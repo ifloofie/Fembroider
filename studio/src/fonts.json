@@ -1,0 +1,402 @@
+[
+{
+"name": "Yellowtail",
+"slug": "yellowtail",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 7
+},
+{
+"name": "Pacifico",
+"slug": "pacifico",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 6
+},
+{
+"name": "Dancing Script",
+"slug": "dancing-script",
+"weight": 700,
+"kind": "Script",
+"tail": true,
+"tilt": 5
+},
+{
+"name": "Lobster",
+"slug": "lobster",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 6
+},
+{
+"name": "Kaushan Script",
+"slug": "kaushan-script",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 6
+},
+{
+"name": "Satisfy",
+"slug": "satisfy",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 6
+},
+{
+"name": "Great Vibes",
+"slug": "great-vibes",
+"weight": 400,
+"kind": "Script",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Damion",
+"slug": "damion",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 7
+},
+{
+"name": "Cookie",
+"slug": "cookie",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 5
+},
+{
+"name": "Lobster Two",
+"slug": "lobster-two",
+"weight": 700,
+"kind": "Script",
+"tail": true,
+"tilt": 5
+},
+{
+"name": "Leckerli One",
+"slug": "leckerli-one",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 5
+},
+{
+"name": "Grand Hotel",
+"slug": "grand-hotel",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 6
+},
+{
+"name": "Norican",
+"slug": "norican",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 5
+},
+{
+"name": "Mr Dafoe",
+"slug": "mr-dafoe",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 7
+},
+{
+"name": "Rochester",
+"slug": "rochester",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 4
+},
+{
+"name": "Courgette",
+"slug": "courgette",
+"weight": 400,
+"kind": "Script",
+"tail": true,
+"tilt": 4
+},
+{
+"name": "Berkshire Swash",
+"slug": "berkshire-swash",
+"weight": 400,
+"kind": "Script",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Graduate",
+"slug": "graduate",
+"weight": 400,
+"kind": "Athletic",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Oswald",
+"slug": "oswald",
+"weight": 700,
+"kind": "Athletic",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Anton",
+"slug": "anton",
+"weight": 400,
+"kind": "Athletic",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Teko",
+"slug": "teko",
+"weight": 600,
+"kind": "Athletic",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Russo One",
+"slug": "russo-one",
+"weight": 400,
+"kind": "Athletic",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Racing Sans One",
+"slug": "racing-sans-one",
+"weight": 400,
+"kind": "Athletic",
+"tail": false,
+"tilt": 3
+},
+{
+"name": "Fugaz One",
+"slug": "fugaz-one",
+"weight": 400,
+"kind": "Athletic",
+"tail": false,
+"tilt": 3
+},
+{
+"name": "Squada One",
+"slug": "squada-one",
+"weight": 400,
+"kind": "Athletic",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Black Ops One",
+"slug": "black-ops-one",
+"weight": 400,
+"kind": "Athletic",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Holtwood One SC",
+"slug": "holtwood-one-sc",
+"weight": 400,
+"kind": "Athletic",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Alfa Slab One",
+"slug": "alfa-slab-one",
+"weight": 400,
+"kind": "Block",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Bebas Neue",
+"slug": "bebas-neue",
+"weight": 400,
+"kind": "Block",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Bungee",
+"slug": "bungee",
+"weight": 400,
+"kind": "Block",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Archivo Black",
+"slug": "archivo-black",
+"weight": 400,
+"kind": "Block",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Staatliches",
+"slug": "staatliches",
+"weight": 400,
+"kind": "Block",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Passion One",
+"slug": "passion-one",
+"weight": 700,
+"kind": "Block",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Bowlby One SC",
+"slug": "bowlby-one-sc",
+"weight": 400,
+"kind": "Block",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Changa One",
+"slug": "changa-one",
+"weight": 400,
+"kind": "Block",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Ultra",
+"slug": "ultra",
+"weight": 400,
+"kind": "Block",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Abril Fatface",
+"slug": "abril-fatface",
+"weight": 400,
+"kind": "Serif",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Playfair Display",
+"slug": "playfair-display",
+"weight": 800,
+"kind": "Serif",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Cinzel",
+"slug": "cinzel",
+"weight": 700,
+"kind": "Serif",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Rye",
+"slug": "rye",
+"weight": 400,
+"kind": "Serif",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "UnifrakturMaguntia",
+"slug": "unifrakturmaguntia",
+"weight": 400,
+"kind": "Serif",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Pirata One",
+"slug": "pirata-one",
+"weight": 400,
+"kind": "Serif",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Titan One",
+"slug": "titan-one",
+"weight": 400,
+"kind": "Fun",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Lilita One",
+"slug": "lilita-one",
+"weight": 400,
+"kind": "Fun",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Fredoka",
+"slug": "fredoka",
+"weight": 600,
+"kind": "Fun",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Baloo 2",
+"slug": "baloo-2",
+"weight": 800,
+"kind": "Fun",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Comfortaa",
+"slug": "comfortaa",
+"weight": 700,
+"kind": "Fun",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Caveat",
+"slug": "caveat",
+"weight": 700,
+"kind": "Fun",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Merienda",
+"slug": "merienda",
+"weight": 700,
+"kind": "Fun",
+"tail": false,
+"tilt": 0
+},
+{
+"name": "Permanent Marker",
+"slug": "permanent-marker",
+"weight": 400,
+"kind": "Fun",
+"tail": false,
+"tilt": 0
+}
+]

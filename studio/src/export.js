@@ -1,0 +1,598 @@
+// Stitch exporter: placed layers -> sewing sequence -> machine files (EXP+INF+BMP, JEF, DST) -> ZIP.
+// Units: world millimetres, y up, origin = hoop centre. Machine files use 0.1 mm.
+var StitchExport = (function () {
+  'use strict';
+
+  var MIN_STITCH = 0.3;  // mm: closer needle points are dropped (thread-break risk)
+  var TRAVEL = 2.0;      // mm: shorter moves are sewn straight
+  var RUN_LEN = 2.5;     // mm: running stitch length for underlay and hidden travel
+  var LOCK = 0.5;        // mm: tie-in / tie-off stitch length
+
+  function dist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+
+  // ---------- placement ----------
+  function makeXform(t) {
+    var r = (t.rotation || 0) * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+    var fx = t.mirrorX ? -1 : 1, fy = t.mirrorY ? -1 : 1, tx = t.x || 0, ty = t.y || 0;
+    return {
+      fwd: function (p) { var x = p[0] * fx, y = p[1] * fy; return [c * x - s * y + tx, s * x + c * y + ty]; },
+      inv: function (p) { var x = p[0] - tx, y = p[1] - ty; return [(c * x + s * y) * fx, (-s * x + c * y) * fy]; }
+    };
+  }
+
+  // ---------- helpers ----------
+  function resample(poly, step, closed) {
+    var pts = poly.slice(); if (closed) pts.push(poly[0]);
+    var out = [pts[0]], carry = 0;
+    for (var i = 1; i < pts.length; i++) {
+      var a = pts[i - 1], b = pts[i], L = dist(a, b), t = step - carry;
+      while (t <= L) { out.push([a[0] + (b[0] - a[0]) * t / L, a[1] + (b[1] - a[1]) * t / L]); t += step; }
+      carry = L - (t - step);
+    }
+    if (dist(out[out.length - 1], pts[pts.length - 1]) > 0.5) out.push(pts[pts.length - 1]);
+    return out;
+  }
+  // consecutive chords -> needle runs (zigzag satin and tatami rows continue; gaps start a new run)
+  function chordRuns(chords) {
+    var runs = [], run = [];
+    chords.forEach(function (c) {
+      var a = [c[0], c[1]], b = [c[2], c[3]];
+      if (run.length && dist(a, run[run.length - 1]) <= 1.2) run.push(b);
+      else { if (run.length > 1) runs.push(run); run = [a, b]; }
+    });
+    if (run.length > 1) runs.push(run);
+    return runs;
+  }
+  function nnOrder(paths, from) {
+    var left = paths.slice(), res = [], cur = from || null;
+    while (left.length) {
+      var bi = 0, flip = false, bd = Infinity;
+      left.forEach(function (p, i) {
+        if (!cur) { var d = p[0][0]; if (d < bd) { bd = d; bi = i; flip = false; } return; }
+        var d0 = dist(cur, p[0]), d1 = dist(cur, p[p.length - 1]);
+        if (d0 < bd) { bd = d0; bi = i; flip = false; }
+        if (d1 < bd) { bd = d1; bi = i; flip = true; }
+      });
+      var p = left.splice(bi, 1)[0];
+      if (flip) p = p.slice().reverse();
+      res.push(p); cur = p[p.length - 1];
+    }
+    return res;
+  }
+
+  // ---------- travel routing inside the shape that will cover it ----------
+  function Router(inside, xf) {
+    var g = inside, W = g.w, Hh = g.h;
+    function cellOf(pl) { return [Math.floor((pl[0] - g.x0) / g.res), Math.floor((g.y1 - pl[1]) / g.res)]; }
+    function isIn(pw) {
+      var c = cellOf(xf.inv(pw));
+      return c[0] >= 0 && c[1] >= 0 && c[0] < W && c[1] < Hh && g.data[c[1] * W + c[0]] === 1;
+    }
+    function lineIn(a, b) {
+      var L = dist(a, b), n = Math.max(1, Math.ceil(L / 0.25));
+      for (var k = 0; k <= n; k++) {
+        var t = k / n;
+        if (t * L < 0.8 || (1 - t) * L < 0.8) continue; // stitch ends sit on the shape's edge
+        if (!isIn([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])) return false;
+      }
+      return true;
+    }
+    function nearestCell(pw) {
+      var c0 = cellOf(xf.inv(pw));
+      for (var r = 0; r < 8; r++) {
+        var best = null, bd = Infinity;
+        for (var dj = -r; dj <= r; dj++) for (var di = -r; di <= r; di++) {
+          var i = c0[0] + di, j = c0[1] + dj;
+          if (i < 0 || j < 0 || i >= W || j >= Hh || g.data[j * W + i] !== 1) continue;
+          var d2 = di * di + dj * dj; if (d2 < bd) { bd = d2; best = j * W + i; }
+        }
+        if (best !== null) return best;
+      }
+      return null;
+    }
+    function cellWorld(k) { return xf.fwd([g.x0 + (k % W + 0.5) * g.res, g.y1 - (Math.floor(k / W) + 0.5) * g.res]); }
+    return {
+      route: function (a, b) {
+        if (dist(a, b) > 160) return null; // long runs are fine: they only cross ground that will be sewn over
+        if (lineIn(a, b)) return [b];
+        var ca = nearestCell(a), cb = nearestCell(b);
+        if (ca === null || cb === null) return null;
+        var prev = new Map(); prev.set(ca, -1);
+        var q = [ca], head = 0, found = false;
+        while (head < q.length) {
+          var k = q[head++];
+          if (k === cb) { found = true; break; }
+          var ki = k % W, kj = Math.floor(k / W);
+          for (var dj = -1; dj <= 1; dj++) for (var di = -1; di <= 1; di++) {
+            if (!di && !dj) continue;
+            var ni = ki + di, nj = kj + dj;
+            if (ni < 0 || nj < 0 || ni >= W || nj >= Hh) continue;
+            var nk = nj * W + ni;
+            if (g.data[nk] !== 1 || prev.has(nk)) continue;
+            prev.set(nk, k); q.push(nk);
+          }
+          if (q.length > 60000) break;
+        }
+        if (!found) return null;
+        var cells = [], k2 = cb;
+        while (k2 !== -1) { cells.push(k2); k2 = prev.get(k2); }
+        var pts = [a].concat(cells.reverse().map(cellWorld)).concat([b]);
+        var out = [], i = 0;
+        while (i < pts.length - 1) {
+          var j = pts.length - 1;
+          while (j > i + 1 && !lineIn(pts[i], pts[j])) j--;
+          out.push(pts[j]); i = j;
+        }
+        var total = 0, prv = a;
+        out.forEach(function (p) { total += dist(prv, p); prv = p; });
+        return total > 3 * dist(a, b) + 15 ? null : out;
+      }
+    };
+  }
+
+  // ---------- sequence builder ----------
+  function Seq() {
+    this.cmds = [];       // [x, y, type] type: 'S' stitch, 'J' jump, 'C' colour change
+    this.last = null; this.prevDir = null;
+    this.n = { stitches: 0, jumps: 0, travels: 0, colors: 0 };
+    this.router = null;
+  }
+  Seq.prototype.add = function (t, p) { this.cmds.push([p[0], p[1], t]); if (t === 'S') this.n.stitches++; if (t === 'J') this.n.jumps++; };
+  Seq.prototype.stitch = function (p, force) {
+    if (this.last && !force && dist(p, this.last) < MIN_STITCH) return;
+    if (this.last && dist(p, this.last) > 7) {           // split anything unusually long
+      var n = Math.ceil(dist(p, this.last) / 7), a = this.last;
+      for (var k = 1; k < n; k++) this.add('S', [a[0] + (p[0] - a[0]) * k / n, a[1] + (p[1] - a[1]) * k / n]);
+    }
+    this.add('S', p); this.last = p;
+  };
+  Seq.prototype.lock = function (at, toward) {
+    var dx = toward[0] - at[0], dy = toward[1] - at[1], L = Math.hypot(dx, dy) || 1;
+    var u = [at[0] + dx / L * LOCK, at[1] + dy / L * LOCK];
+    for (var k = 0; k < 2; k++) { this.stitch(u, true); this.stitch(at, true); }
+  };
+  Seq.prototype.moveTo = function (p, next) {
+    if (!this.last) { this.add('J', p); this.last = p; this.stitch(p, true); this.lock(p, next); return; }
+    var d = dist(p, this.last);
+    if (d <= TRAVEL) { this.stitch(p); return; }
+    var route = this.router ? this.router.route(this.last, p) : null;
+    if (route) {
+      var self = this;
+      route.forEach(function (tgt) {
+        var a = self.last, n = Math.max(1, Math.ceil(dist(a, tgt) / RUN_LEN));
+        for (var k = 1; k <= n; k++) { self.stitch([a[0] + (tgt[0] - a[0]) * k / n, a[1] + (tgt[1] - a[1]) * k / n]); if (self.cmds.length) self.cmds[self.cmds.length - 1].travel = 1; }
+      });
+      this.n.travels++;
+      return;
+    }
+    this.lock(this.last, this.prevDir || p);             // tie off before the jump
+    this.add('J', p); this.last = p; this.stitch(p, true); this.lock(p, next);
+  };
+  Seq.prototype.path = function (pts) {
+    if (!pts.length) return;
+    this.moveTo(pts[0], pts[1] || pts[0]);
+    for (var i = 1; i < pts.length; i++) { this.prevDir = this.last; this.stitch(pts[i]); }
+    this.prevDir = pts.length > 1 ? pts[pts.length - 2] : pts[0];
+  };
+  Seq.prototype.endBlock = function () { if (this.last) this.lock(this.last, this.prevDir || this.last); };
+
+  // placed: [{ result, transform, name }] in sewing order (first sews first)
+  // split a fill part into its islands (chord[7], tagged by the engine), each with the underlay runs that lie in
+  // it, sorted by where they sit across the hoop (x after the layer's transform)
+  function fillGroups(part, W) {
+    var by = {}, list = [];
+    part.chords.forEach(function (c) {
+      var k = c[7] === undefined ? -1 : c[7], g = by[k];
+      if (!g) { g = by[k] = { chords: [], under: [], sx: 0, n: 0, lx: 0, ly: 0, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }; list.push(g); }
+      g.chords.push(c);
+      var mx = (c[0] + c[2]) / 2, my = (c[1] + c[3]) / 2, w = W([mx, my]);
+      g.sx += w[0]; g.n++; g.lx += mx; g.ly += my;
+      g.x0 = Math.min(g.x0, c[0], c[2]); g.x1 = Math.max(g.x1, c[0], c[2]); g.y0 = Math.min(g.y0, c[1], c[3]); g.y1 = Math.max(g.y1, c[1], c[3]);
+    });
+    list.forEach(function (g) { g.x = g.sx / g.n; g.lx /= g.n; g.ly /= g.n; });
+    var tags = part.underIsl && part.under && part.underIsl.length === part.under.length ? part.underIsl : null;
+    (part.under || []).forEach(function (pl, ui) {
+      if (!pl.length) return;
+      if (tags && by[tags[ui]]) { by[tags[ui]].under.push(pl); return; }
+      var m = pl[Math.floor(pl.length / 2)], best = null, bd = Infinity;
+      list.forEach(function (g) {
+        var inside = m[0] >= g.x0 - 1 && m[0] <= g.x1 + 1 && m[1] >= g.y0 - 1 && m[1] <= g.y1 + 1;
+        var d = Math.hypot(m[0] - g.lx, m[1] - g.ly) + (inside ? 0 : 1e4);
+        if (d < bd) { bd = d; best = g; }
+      });
+      if (best) best.under.push(pl);
+      else { var g0 = { chords: [], under: [pl], x: W(m)[0] }; list.push(g0); }
+    });
+    list.forEach(function (g) {
+      var a = g.chords[0], z = g.chords[g.chords.length - 1];
+      g.x0 = Infinity; g.x1 = -Infinity;
+      g.chords.forEach(function (c) { var p = W([c[0], c[1]]), q = W([c[2], c[3]]); g.x0 = Math.min(g.x0, p[0], q[0]); g.x1 = Math.max(g.x1, p[0], q[0]); });
+      g.under.forEach(function (pl) { pl.forEach(function (q) { var w = W(q); g.x0 = Math.min(g.x0, w[0]); g.x1 = Math.max(g.x1, w[0]); }); });
+      g.ends = a ? [W([a[0], a[1]]), W([z[2], z[3]])] : [W(g.under[0][0]), W(g.under[0][0])];
+    });
+    return list;
+  }
+  // Order islands for one colour so the needle sweeps left to right: an island may start only once every island
+  // lying wholly to its left is done (nothing is left behind to jump back to), and among those the nearest entry
+  // wins, with going left penalised. An island can be sewn in reverse, so islands stacked above each other snake.
+  var SW_BACK = 6, SW_LEAVE = 6, SW_LOOK_MAX = 40; // mm-weights for going left / leaving islands behind; lookahead up to 40 islands
+  function sweepOrder(items, from) {
+    var left = items.slice(), out = [], pos = from;
+    function options(pos, pool) {
+      var res = [];
+      pool.forEach(function (it, i) {
+        if (pool.some(function (o) { return o !== it && o.x1 < it.x0 - 0.5; })) return;
+        [0, 1].forEach(function (rev) {
+          if (rev && !it.reversible) return;
+          var e = it.near && pos ? it.near(pos) : it.ends[rev], x = it.near && pos ? e : it.ends[1 - rev];
+          var cost = pos ? Math.hypot(e[0] - pos[0], e[1] - pos[1]) + SW_BACK * Math.max(0, pos[0] - e[0]) : e[0];
+          // and don't finish to the right of islands that are still waiting: that forces a jump back later
+          pool.forEach(function (o) { if (o !== it && o.x1 < x[0]) cost += SW_LEAVE * (x[0] - o.x1); });
+          res.push({ i: i, rev: rev, cost: cost, exit: x });
+        });
+      });
+      return res;
+    }
+    while (left.length) {
+      var opts = options(pos, left), best = null;
+      opts.forEach(function (o) {
+        var total = o.cost;
+        if (left.length > 1 && left.length <= SW_LOOK_MAX) {   // one step of lookahead: where does this choice leave the next move?
+          var rest = left.slice(0, o.i).concat(left.slice(o.i + 1)), nx = options(o.exit, rest), m = Infinity;
+          nx.forEach(function (q) { if (q.cost < m) m = q.cost; });
+          if (m < Infinity) total += m;
+        }
+        if (!best || total < best.total) best = { i: o.i, rev: o.rev, total: total };
+      });
+      if (!best) best = { i: 0, rev: 0 };
+      var it = left.splice(best.i, 1)[0];
+      out.push({ item: it, rev: best.rev });
+      pos = it.near && pos ? it.near(pos) : it.ends[1 - best.rev];
+    }
+    return out;
+  }
+  function reverseChords(cs) { return cs.slice().reverse().map(function (c) { var d = c.slice(); d[0] = c[2]; d[1] = c[3]; d[2] = c[0]; d[3] = c[1]; return d; }); }
+  function buildSequence(placed, opts) {
+    opts = opts || {};
+    // thread / needle dependent limits (defaults suit 40 wt on a 75/11 needle)
+    MIN_STITCH = opts.minStitch || 0.3; RUN_LEN = opts.runLen || 2.5; LOCK = opts.lock || 0.5;
+    var seq = new Seq(), threads = [], blocks = [], curColor = null, block = null;
+    placed.forEach(function (L) {
+      var xf = makeXform(L.transform || {});
+      var W = function (p) { return xf.fwd(p); };
+      L.result.parts.forEach(function (part) {
+        if (!part.chords.length && !(part.loops && part.loops.length)) return;
+        if (part.color !== curColor) {
+          if (curColor !== null) { seq.endBlock(); seq.add('C', seq.last || [0, 0]); seq.n.colors++; seq.last = null; }
+          curColor = part.color;
+          threads.push({ color: part.color, thread: part.thread, name: (part.thread && part.thread.name) || part.color });
+          block = { color: part.color, thread: part.thread, layers: [], stitches: 0, start: seq.n.stitches };
+          blocks.push(block);
+        }
+        if (block.layers.indexOf(L.name) < 0) block.layers.push(L.name);
+        seq.router = Router(part.inside || L.result.inside, xf);
+        if (part.kind === 'outline') {
+          // outlines letter by letter from left to right across the hoop
+          // closed loops can start anywhere: each starts (and so ends) at its point nearest the needle
+          sweepOrder((part.loops || []).filter(function (lp) { return lp.pen.length > 2; }).map(function (lp) {
+            var x0 = Infinity, x1 = -Infinity, pw = lp.pen.map(W); pw.forEach(function (w) { x0 = Math.min(x0, w[0]); x1 = Math.max(x1, w[0]); });
+            var near = function (pos) { var bk = 0, bd = Infinity; for (var k = 0; k < pw.length - 1; k += 2) { var d = dist(pw[k], pos); if (d < bd) { bd = d; bk = k; } } return pw[bk]; };
+            return { lp: lp, x0: x0, x1: x1, ends: [pw[0], pw[0]], near: near };
+          }), seq.last).map(function (o) { return o.item.lp; }).forEach(function (lp) {
+            if (seq.last && lp.pen.length > 2 && (lp.pen.length - 1) % 2 === 0 && lp.under.length >= lp.pen.length - 1) {
+              var pw = lp.pen.map(W), bk = 0, bd = Infinity;
+              for (var k = 0; k < pw.length - 1; k += 2) { var d = dist(pw[k], seq.last); if (d < bd) { bd = d; bk = k; } }
+              if (bk) lp = { pen: lp.pen.slice(bk).concat(lp.pen.slice(1, bk + 1)), under: lp.under.slice(bk).concat(lp.under.slice(0, bk)) };
+            }
+            seq.path(resample(lp.under, 2.0, true).map(W));
+            seq.path(lp.pen.map(W));
+          });
+        } else {
+          // island by island, left to right across the hoop: each island's underlay, then its top stitching.
+          // The needle only moves on to the right within a colour and comes back left at the colour change.
+          var gs = fillGroups(part, W); gs.forEach(function (g) { g.reversible = true; });
+          sweepOrder(gs, seq.last).forEach(function (o) {
+            var g = o.item;
+            if (o.rev) g = { chords: reverseChords(g.chords), under: g.under };
+            var under = g.under.filter(function (pl) { return pl.length > 1; }).map(function (pl) { return resample(pl, RUN_LEN).map(W); });
+            nnOrder(under, seq.last).forEach(function (p) { seq.path(p); });
+            var scatter = g.chords.filter(function (c) { return c[4] === 1 || c[4] === 4; });
+            var main = g.chords.filter(function (c) { return !(c[4] === 1 || c[4] === 4); });
+            nnOrder(chordRuns(scatter).map(function (r) { return r.map(W); }), seq.last).forEach(function (p) { seq.path(p); });
+            chordRuns(main).forEach(function (r) { seq.path(r.map(W)); });
+          });
+        }
+        block.stitches = seq.n.stitches - block.start;
+      });
+    });
+    seq.endBlock();
+    // bounds
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    seq.cmds.forEach(function (c) { if (c[2] === 'C') return; minX = Math.min(minX, c[0]); maxX = Math.max(maxX, c[0]); minY = Math.min(minY, c[1]); maxY = Math.max(maxY, c[1]); });
+    if (!isFinite(minX)) { minX = maxX = minY = maxY = 0; }
+    var spm = opts.speed || 600;
+    return {
+      cmds: seq.cmds, threads: threads, blocks: blocks,
+      stats: { stitches: seq.n.stitches, jumps: seq.n.jumps, travels: seq.n.travels, colorChanges: seq.n.colors,
+        minutes: seq.n.stitches / spm + seq.n.colors * 0.5 },
+      bounds: { minX: minX, minY: minY, maxX: maxX, maxY: maxY, w: maxX - minX, h: maxY - minY }
+    };
+  }
+
+  // ---------- encoders ----------
+  // convert to integer 0.1 mm absolute positions; split moves to the format's limit
+  function units(seq, maxD) {
+    var out = [], ux = 0, uy = 0;
+    seq.cmds.forEach(function (c) {
+      var tx = Math.round(c[0] * 10), ty = Math.round(c[1] * 10);
+      if (c[2] === 'C') { out.push([0, 0, 'C']); return; }
+      var dx = tx - ux, dy = ty - uy;
+      var n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / maxD));
+      var px = ux, py = uy;
+      for (var k = 1; k <= n; k++) {
+        var nx = ux + Math.round(dx * k / n), ny = uy + Math.round(dy * k / n);
+        out.push([nx - px, ny - py, c[2]]); px = nx; py = ny;
+      }
+      ux = tx; uy = ty;
+    });
+    return out;
+  }
+  function Bytes() { this.a = []; }
+  Bytes.prototype.u8 = function (v) { this.a.push(v & 255); };
+  Bytes.prototype.i8 = function (v) { this.a.push(v & 255); };
+  Bytes.prototype.u16le = function (v) { this.u8(v); this.u8(v >> 8); };
+  Bytes.prototype.u16be = function (v) { this.u8(v >> 8); this.u8(v); };
+  Bytes.prototype.u32le = function (v) { this.u8(v); this.u8(v >> 8); this.u8(v >> 16); this.u8(v >> 24); };
+  Bytes.prototype.u32be = function (v) { this.u8(v >> 24); this.u8(v >> 16); this.u8(v >> 8); this.u8(v); };
+  Bytes.prototype.str = function (s) { for (var i = 0; i < s.length; i++) this.u8(s.charCodeAt(i)); };
+  Bytes.prototype.out = function () { return new Uint8Array(this.a); };
+
+  // Melco / Bernina EXP: signed byte pairs (y up), 0x80 escapes commands
+  function writeEXP(seq) {
+    var b = new Bytes();
+    var cmds = seq.cmds, last = null;
+    for (var q = cmds.length - 1; q >= 0 && !last; q--) if (cmds[q][2] !== 'C') last = cmds[q];
+    // finish with the needle back at the hoop centre, as the designs on Bernina cards do
+    var home = last && (Math.abs(last[0]) > 0.05 || Math.abs(last[1]) > 0.05) ? { cmds: cmds.concat([[0, 0, 'J']]) } : seq;
+    units(home, 127).forEach(function (u) {
+      if (u[2] === 'C') { b.u8(0x80); b.u8(0x01); b.u8(0); b.u8(0); return; }
+      if (u[2] === 'J') { b.u8(0x80); b.u8(0x04); }
+      b.i8(u[0]); b.i8(u[1]);
+    });
+    return b.out();
+  }
+
+  // Bernina INF (EXP+ colour file), version 2 as found on Deco 330 cards: big-endian colour records, then a
+  // "JANOMEB2" block for the Janome-built Deco machines holding the Janome hoop code and the 40 x 58 picture
+  // shown on the machine's design key. The block's other bytes are constant across every card file we've seen.
+  var INF_B2_HEAD = '000009300000000109284a414e4f4d454232001a0000000000020000000000000928a4aa57400000000000000000000000000000000000000000';
+  var INF_B2_TAIL = '00000000280000003a000000280000000000000000000000';
+  var INF_HOOP_AT = 25, ICON_W = 40, ICON_H = 58;
+  function hexBytes(h) { var a = []; for (var i = 0; i < h.length; i += 2) a.push(parseInt(h.substr(i, 2), 16)); return a; }
+  // machine design-key picture: each thread's darkness (0 = empty, up to 12 = darkest), design fitted and centred
+  function infIcon(seq) {
+    var g = new Uint8Array(ICON_W * ICON_H), bd = seq.bounds;
+    var sc = Math.min(36 / Math.max(1, bd.w), 46 / Math.max(1, bd.h)), cx = 19.5, cy = 28.5, mx = bd.minX + bd.w / 2, my = bd.minY + bd.h / 2;
+    var shade = seq.threads.map(function (t) {
+      var r = parseInt(t.color.slice(1, 3), 16), gg = parseInt(t.color.slice(3, 5), 16), b = parseInt(t.color.slice(5, 7), 16);
+      return Math.max(1, Math.min(12, Math.round(15 * (1 - (r + gg + b) / 765) + 1)));
+    });
+    var ci = 0, prev = null;
+    seq.cmds.forEach(function (c) {
+      if (c[2] === 'C') { ci++; prev = null; return; }
+      if (c[2] === 'S' && prev) {
+        var n = Math.max(1, Math.ceil(Math.hypot(c[0] - prev[0], c[1] - prev[1]) * sc * 2));
+        for (var k = 0; k <= n; k++) {
+          var x = Math.floor(cx + ((prev[0] + (c[0] - prev[0]) * k / n) - mx) * sc + 0.5), y = Math.floor(cy - ((prev[1] + (c[1] - prev[1]) * k / n) - my) * sc + 0.5);
+          if (x >= 0 && y >= 0 && x < ICON_W && y < ICON_H) g[y * ICON_W + x] = shade[ci] || 11;
+        }
+      }
+      prev = c;
+    });
+    return g;
+  }
+  var INF_HOOP = { A: 3, B: 2, C: 1 }; // Janome hoop codes: 3 = 126 x 110, 2 = 140 x 200, 1 = 50 x 50
+  function writeINF(seq, opts) {
+    opts = opts || {};
+    var b = new Bytes(), recs = [];
+    seq.threads.forEach(function (t, i) {
+      var r = parseInt(t.color.slice(1, 3), 16), g = parseInt(t.color.slice(3, 5), 16), bl = parseInt(t.color.slice(5, 7), 16);
+      var desc = (t.thread && t.thread.name) || 'Thread', chart = (t.thread && ((t.thread.brand || 'Janome') + ' ' + t.thread.code)) || 'Custom';
+      desc = desc.replace(/[^\x20-\x7e]/g, '?'); chart = chart.replace(/[^\x20-\x7e]/g, '?');
+      var rb = new Bytes();
+      rb.u16be(11 + desc.length + chart.length); rb.u16be(i + 1); rb.u8(r); rb.u8(g); rb.u8(bl); rb.u16be(i + 1);
+      rb.str(desc); rb.u8(0); rb.str(chart); rb.u8(0);
+      recs.push(rb.a);
+    });
+    var body = recs.reduce(function (a, r) { return a + r.length; }, 0);
+    b.u32be(2); b.u32be(12); b.u32be(20 + body); b.u32be(8 + body); b.u32be(seq.threads.length);
+    recs.forEach(function (r) { r.forEach(function (v) { b.u8(v); }); });
+    var head = hexBytes(INF_B2_HEAD);
+    head[INF_HOOP_AT] = INF_HOOP[opts.hoop] !== undefined ? INF_HOOP[opts.hoop] : (opts.hoopCode !== undefined ? opts.hoopCode : 2);
+    head.forEach(function (v) { b.u8(v); });
+    infIcon(seq).forEach(function (v) { b.u8(v); });
+    hexBytes(INF_B2_TAIL).forEach(function (v) { b.u8(v); });
+    return b.out();
+  }
+
+  var JEF_HOOP = { A: 3, B: 2, C: 1 };
+  function writeJEF(seq, opts) {
+    var u = units(seq, 127), b = new Bytes();
+    // colour indices into the Janome chart; neighbours that map to the same index take the next nearest
+    var palette = [], last = -1;
+    seq.threads.forEach(function (t) {
+      var idx = t.thread ? t.thread.index : 1;
+      if (idx === last && opts.threadAlt) idx = opts.threadAlt(t.color, idx);
+      palette.push(idx); last = idx;
+    });
+    var nColors = palette.length, points = 1;
+    u.forEach(function (c) { points += c[2] === 'S' ? 1 : 2; });
+    var d = new Date(), pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    var date = d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+    b.u32le(0x74 + nColors * 8); b.u32le(0x14); b.str(date); b.u8(0); b.u8(0);
+    b.u32le(nColors); b.u32le(points); b.u32le(JEF_HOOP[opts.hoop] !== undefined ? JEF_HOOP[opts.hoop] : 3);
+    var bd = seq.bounds, L = Math.round(-bd.minX * 10), T = Math.round(bd.maxY * 10), R = Math.round(bd.maxX * 10), Bm = Math.round(-bd.minY * 10);
+    b.u32le(L); b.u32le(T); b.u32le(R); b.u32le(Bm);
+    [[550, 550], [250, 250], [700, 1000], [700, 1000]].forEach(function (h) {
+      var e = [h[0] - L, h[1] - T, h[0] - R, h[1] - Bm];
+      if (Math.min.apply(null, e) >= 0) e.forEach(function (v) { b.u32le(v); });
+      else for (var k = 0; k < 4; k++) b.u32le(-1);
+    });
+    palette.forEach(function (p) { b.u32le(p); });
+    palette.forEach(function () { b.u32le(0x0D); });
+    u.forEach(function (c) {
+      if (c[2] === 'C') { b.u8(0x80); b.u8(0x01); b.i8(0); b.i8(0); return; }
+      if (c[2] === 'J') { b.u8(0x80); b.u8(0x02); }
+      b.i8(c[0]); b.i8(c[1]);
+    });
+    b.u8(0x80); b.u8(0x10);
+    return b.out();
+  }
+
+  function dstRecord(x, y, type) {
+    var b0 = 0, b1 = 0, b2 = 0, bit = function (n) { return 1 << n; };
+    if (type === 'C') return [0, 0, 0xC3];
+    if (type === 'E') return [0, 0, 0xF3];
+    if (type === 'J') b2 |= bit(7);
+    b2 |= bit(0) | bit(1);
+    if (x > 40) { b2 |= bit(2); x -= 81; } if (x < -40) { b2 |= bit(3); x += 81; }
+    if (x > 13) { b1 |= bit(2); x -= 27; } if (x < -13) { b1 |= bit(3); x += 27; }
+    if (x > 4) { b0 |= bit(2); x -= 9; } if (x < -4) { b0 |= bit(3); x += 9; }
+    if (x > 1) { b1 |= bit(0); x -= 3; } if (x < -1) { b1 |= bit(1); x += 3; }
+    if (x > 0) { b0 |= bit(0); x -= 1; } if (x < 0) { b0 |= bit(1); x += 1; }
+    if (y > 40) { b2 |= bit(5); y -= 81; } if (y < -40) { b2 |= bit(4); y += 81; }
+    if (y > 13) { b1 |= bit(5); y -= 27; } if (y < -13) { b1 |= bit(4); y += 27; }
+    if (y > 4) { b0 |= bit(5); y -= 9; } if (y < -4) { b0 |= bit(4); y += 9; }
+    if (y > 1) { b1 |= bit(7); y -= 3; } if (y < -1) { b1 |= bit(6); y += 3; }
+    if (y > 0) { b0 |= bit(7); y -= 1; } if (y < 0) { b0 |= bit(6); y += 1; }
+    if (x !== 0 || y !== 0) throw new Error('DST move out of range');
+    return [b0, b1, b2];
+  }
+  function writeDST(seq, name) {
+    var u = units(seq, 121), b = new Bytes(), bd = seq.bounds, lastC = seq.cmds.filter(function (c) { return c[2] !== 'C'; }).pop() || [0, 0];
+    var padL = function (s, n) { s = String(s); while (s.length < n) s = ' ' + s; return s; };
+    var padR = function (s, n) { s = String(s); while (s.length < n) s += ' '; return s.slice(0, n); };
+    var sgn = function (v) { return (v >= 0 ? '+' : '-') + padL(Math.abs(v), 5); };
+    b.str('LA:' + padR(name || 'Untitled', 16) + '\r');
+    b.str('ST:' + padL(u.filter(function (c) { return c[2] === 'S'; }).length, 7) + '\r');
+    b.str('CO:' + padL(seq.stats.colorChanges, 3) + '\r');
+    b.str('+X:' + padL(Math.abs(Math.round(bd.maxX * 10)), 5) + '\r');
+    b.str('-X:' + padL(Math.abs(Math.round(bd.minX * 10)), 5) + '\r');
+    b.str('+Y:' + padL(Math.abs(Math.round(bd.maxY * 10)), 5) + '\r');
+    b.str('-Y:' + padL(Math.abs(Math.round(bd.minY * 10)), 5) + '\r');
+    b.str('AX:' + sgn(Math.round(lastC[0] * 10)) + '\r');
+    b.str('AY:' + sgn(Math.round(lastC[1] * 10)) + '\r');
+    b.str('MX:+' + padL(0, 5) + '\r'); b.str('MY:+' + padL(0, 5) + '\r'); b.str('PD:******\r');
+    b.u8(0x1A);
+    while (b.a.length < 512) b.u8(0x20);
+    u.forEach(function (c) { dstRecord(c[0], c[1], c[2]).forEach(function (v) { b.u8(v); }); });
+    dstRecord(0, 0, 'E').forEach(function (v) { b.u8(v); });
+    return b.out();
+  }
+
+  // 24-bit BMP from RGBA pixels (bottom-up rows, 4-byte row padding)
+  function writeBMP(rgba, w, h) {
+    var row = Math.ceil(w * 3 / 4) * 4, size = 54 + row * h, b = new Bytes();
+    b.str('BM'); b.u32le(size); b.u32le(0); b.u32le(54);
+    b.u32le(40); b.u32le(w); b.u32le(h); b.u16le(1); b.u16le(24); b.u32le(0); b.u32le(row * h); b.u32le(2835); b.u32le(2835); b.u32le(0); b.u32le(0);
+    for (var y = h - 1; y >= 0; y--) {
+      for (var x = 0; x < w; x++) { var i = (y * w + x) * 4; b.u8(rgba[i + 2]); b.u8(rgba[i + 1]); b.u8(rgba[i]); }
+      for (var p = w * 3; p < row; p++) b.u8(0);
+    }
+    return b.out();
+  }
+
+  // draw the sequence (for the BMP preview and the worksheet image)
+  function drawPreview(seq, ctx, w, h, opts) {
+    opts = opts || {};
+    var bd = seq.bounds, m = opts.margin || 6;
+    var s = Math.min((w - 2 * m) / Math.max(1, bd.w), (h - 2 * m) / Math.max(1, bd.h));
+    var ox = w / 2 - (bd.minX + bd.w / 2) * s, oy = h / 2 + (bd.minY + bd.h / 2) * s;
+    ctx.fillStyle = opts.background || '#ffffff'; ctx.fillRect(0, 0, w, h);
+    ctx.lineWidth = Math.max(1, opts.lineWidth || 0.45 * s); ctx.lineCap = 'round';
+    var ci = 0, prev = null;
+    ctx.strokeStyle = seq.threads[0] ? seq.threads[0].color : '#000';
+    seq.cmds.forEach(function (c) {
+      if (c[2] === 'C') { ci++; ctx.strokeStyle = seq.threads[ci] ? seq.threads[ci].color : '#000'; prev = null; return; }
+      var p = [ox + c[0] * s, oy - c[1] * s];
+      if (c[2] === 'S' && prev) { ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(p[0], p[1]); ctx.stroke(); }
+      prev = p;
+    });
+  }
+
+  // ---------- ZIP (stored, no compression) ----------
+  var CRC = (function () {
+    var t = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+  })();
+  function crc32(u8) { var c = 0xFFFFFFFF; for (var i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function zip(files) {
+    // files: [{ name, data: Uint8Array }]
+    var out = new Bytes(), central = new Bytes(), d = new Date();
+    var dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    var dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    files.forEach(function (f) {
+      var name = f.name, crc = crc32(f.data), off = out.a.length;
+      out.u32le(0x04034b50); out.u16le(20); out.u16le(0); out.u16le(0); out.u16le(dosTime); out.u16le(dosDate);
+      out.u32le(crc); out.u32le(f.data.length); out.u32le(f.data.length); out.u16le(name.length); out.u16le(0); out.str(name);
+      for (var i = 0; i < f.data.length; i++) out.a.push(f.data[i]);
+      central.u32le(0x02014b50); central.u16le(20); central.u16le(20); central.u16le(0); central.u16le(0); central.u16le(dosTime); central.u16le(dosDate);
+      central.u32le(crc); central.u32le(f.data.length); central.u32le(f.data.length); central.u16le(name.length);
+      central.u16le(0); central.u16le(0); central.u16le(0); central.u16le(0); central.u32le(0); central.u32le(off); central.str(name);
+    });
+    var cOff = out.a.length;
+    central.a.forEach(function (v) { out.a.push(v); });
+    out.u32le(0x06054b50); out.u16le(0); out.u16le(0); out.u16le(files.length); out.u16le(files.length);
+    out.u32le(central.a.length); out.u32le(cOff); out.u16le(0);
+    return out.out();
+  }
+
+  function cardName(n) {
+    var b = String(n || '').toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 8);
+    return b || 'DESIGN';
+  }
+
+  function worksheet(seq, info) {
+    var L = [], bd = seq.bounds;
+    L.push(info.title + ' - stitch-out worksheet');
+    L.push('='.repeat(L[0].length));
+    L.push('');
+    L.push('Machine       ' + info.machine);
+    L.push('Hoop          ' + info.hoopName);
+    L.push('Size          ' + bd.w.toFixed(1) + ' x ' + bd.h.toFixed(1) + ' mm');
+    L.push('Stitches      ' + seq.stats.stitches.toLocaleString('en-US'));
+    L.push('Colours       ' + seq.threads.length + ' (' + seq.stats.colorChanges + ' colour change' + (seq.stats.colorChanges === 1 ? '' : 's') + ')');
+    L.push('Jumps         ' + seq.stats.jumps + (info.trims ? ' (the machine trims at colour changes; snip any loose connecting threads)' : ' (snip the connecting threads; the machine has no trimmer)'));
+    L.push('Est. time     about ' + Math.ceil(seq.stats.minutes) + ' minutes at 600 stitches/min');
+    if (info.materials && info.materials.length) { L.push(''); L.push('MATERIALS'); info.materials.forEach(function (m) { L.push('  ' + m); }); }
+    L.push('');
+    L.push('COLOUR SEQUENCE');
+    seq.blocks.forEach(function (b, i) {
+      L.push('  ' + (i + 1) + '. ' + (b.thread ? (b.thread.brand || 'Janome') + ' ' + b.thread.code + ' ' + b.thread.name : b.color) + '  (' + b.color + ')  ' +
+        b.stitches.toLocaleString('en-US') + ' stitches  - ' + b.layers.join(', '));
+    });
+    L.push('');
+    L.push('FILES');
+    (info.files || []).forEach(function (f) { L.push('  ' + f); });
+    L.push('');
+    if (info.machineId === 'eoc06') {
+      L.push('LOADING (' + info.machine + ')');
+      L.push('  Copy the DST file to a FAT32 USB stick (or send it over Wi-Fi) and open it on the machine.');
+      L.push('  Fit the ' + info.hoopName + '. The machine stops at each colour change and trims the thread itself.');
+    } else {
+      L.push('LOADING (Deco 330)');
+      L.push('  Format the card in the machine first; it creates a folder named EmbF5.');
+      L.push('  Copy the EXP, INF and BMP files straight into EmbF5 (no subfolders), then select ' + info.hoopName + '.');
+      L.push('  If the design will not load, delete the BMP and try again.');
+    }
+    return L.join('\r\n') + '\r\n';
+  }
+
+  return {
+    buildSequence: buildSequence, makeXform: makeXform,
+    writeEXP: writeEXP, writeINF: writeINF, writeJEF: writeJEF, writeDST: writeDST, writeBMP: writeBMP,
+    drawPreview: drawPreview, zip: zip, crc32: crc32, cardName: cardName, worksheet: worksheet
+  };
+})();
+if (typeof module !== 'undefined') module.exports = StitchExport;

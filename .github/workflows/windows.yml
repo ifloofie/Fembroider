@@ -1,0 +1,49 @@
+# Builds the Windows installer and portable zip on a real Windows runner.
+# Run it from the Actions tab ("Run workflow") or by pushing a tag like v0.10.0.
+# Signing: once you have a certificate service, uncomment the env block below
+# (Azure Trusted Signing shown; SignPath offers free signing for open-source projects).
+name: Windows build
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            studio/package-lock.json
+            desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build the app (studio → desktop/app)
+        working-directory: studio
+        run: |
+          npm ci
+          python build.py
+      - name: Build the installer
+        working-directory: desktop
+        run: |
+          npm ci
+          npx electron-builder --win nsis zip --x64 --publish never
+        # env:
+        #   AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        #   AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        #   AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Checksums
+        shell: pwsh
+        working-directory: desktop
+        run: Get-FileHash dist\*.exe, dist\*.zip -Algorithm SHA256 | Format-Table -AutoSize | Out-File dist\SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stitch-studio-windows
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+            desktop/dist/SHA256SUMS.txt

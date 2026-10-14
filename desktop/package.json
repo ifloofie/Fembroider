@@ -1,0 +1,83 @@
+{
+  "name": "stitch-preview",
+  "productName": "Stitch Studio",
+  "version": "0.10.0",
+  "description": "Embroidery digitizer and 3D stitch preview for the Bernina Deco 330",
+  "author": "Stitch Studio contributors",
+  "license": "MIT",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis zip --x64"
+  },
+  "devDependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/saira-extra-condensed": "^5.3.0",
+    "@fontsource/yellowtail": "^5.3.0",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "three": "^0.128.0"
+  },
+  "build": {
+    "appId": "com.stitchpreview.app",
+    "productName": "Stitch Studio",
+    "copyright": "Copyright (c) 2026 Stitch Studio contributors",
+    "electronVersion": "44.4.5",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "app/**/*"
+    ],
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "onlyLoadAppFromAsar": true
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "executableName": "StitchStudio",
+      "requestedExecutionLevel": "asInvoker",
+      "signAndEditExecutable": true,
+      "artifactName": "StitchStudio-${version}-win-x64.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Stitch Studio",
+      "uninstallDisplayName": "Stitch Studio",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "StitchStudio-Setup-${version}-x64.${ext}",
+      "packElevateHelper": false
+    },
+    "publish": null,
+    "afterSign": "build/afterSign.js"
+  }
+}
