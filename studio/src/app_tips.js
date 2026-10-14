@@ -68,7 +68,7 @@
     'ui.twist': ['Twist', 'How tightly the thread is twisted in the preview: the diagonal sheen on each stitch.'],
     'ui.sharp': ['Sheen sharpness', 'How tight the highlight on the thread is. Rayon is sharp and glossy; cotton is soft.'],
     'ui.spec': ['Sheen strength', 'How bright the thread highlight is in the preview.'],
-    'ui.fidelity': ['Fidelity', 'Preview quality. Low draws flat stitches and is fastest; High adds roundness and twist.'],
+    'ui.fidelity': ['Fidelity', 'Preview quality. Low draws flat stitches and is fastest; High adds roundness and twist. Ultra models each stitch as two twisted plies with fibre detail, pinched where the needle goes in, and renders at a higher resolution: best for close-ups and screenshots, heavier on the graphics card.'],
     'ui.copies': ['Stress test', 'Draws several copies of the design to check the preview stays smooth on your graphics card.'],
     // export
     'doc.cardName': ['File name', 'Up to 8 letters, numbers or underscores. This is the name the machine shows on its screen.'],

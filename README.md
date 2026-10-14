@@ -1,4 +1,4 @@
-# Stitch Studio — source (v0.10.1)
+# Stitch Studio — source (v0.11.0)
 
 Embroidery digitizer and 3D stitch preview. Machines: Bernina Deco 330 (EXP+ on a memory card) and
 Poolin EOC06 (DST). Text with 50 fonts and swoops, the full emoji table, imported SVG/bitmaps, Pride

@@ -501,7 +501,7 @@
       sec('look', 'sheen', 'Preview', '',
         row('Play speed', seg('ui.speed', [[1, '1×'], [4, '4×'], [16, '16×']], { label: 'Playback speed' })) +
         row('Lighting', seg('ui.light', [['top', 'Top'], ['raking', 'Raking'], ['soft', 'Soft']], { label: 'Lighting' })) +
-        row('Fidelity', seg('ui.fidelity', [[0, 'Low', 'flat'], [1, 'Medium', 'round'], [2, 'High', 'twist']], { label: 'Fidelity' })) +
+        row('Fidelity', seg('ui.fidelity', [[0, 'Low', 'flat'], [1, 'Med', 'round'], [2, 'High', 'twist'], [3, 'Ultra', 'plies']], { label: 'Fidelity' })) +
         rangeRow('Twist', 'ui.twist', 8, 30, 1, 0, ' /in') +
         rangeRow('Sheen sharpness', 'ui.sharp', 10, 120, 1, 0, '') +
         rangeRow('Sheen strength', 'ui.spec', 0, 100, 1, 0, '%') +
@@ -521,13 +521,14 @@
     var ft = frames.length ? frames.reduce(function (a, b) { return a + b; }, 0) / frames.length : 0;
     $('fpsBig').innerHTML = (ui.bench && ft ? Math.round(1000 / ft) : '—') + '<small>fps</small>';
     kv.innerHTML = '<dt>Frame time</dt><dd>' + (ui.bench && ft ? ft.toFixed(1) + ' ms' : 'idle') + '</dd>' +
-      '<dt>Stitches drawn</dt><dd>' + nfmt(inst) + '</dd><dt>Triangles</dt><dd>' + nfmt(inst * SEG * 2) + '</dd>' +
+      '<dt>Stitches drawn</dt><dd>' + nfmt(inst) + '</dd><dt>Triangles</dt><dd>' + nfmt(inst * threadTemplate().userData.tris) + '</dd>' +
       '<dt>Draw calls</dt><dd>' + (ui.calls || 0) + '</dd><dt>Resolution</dt><dd>' + (ui.resText || '—') + '</dd>' +
       '<dt>Stitch generator</dt><dd>' + (Gen.usingWorker() ? 'background' : 'main thread') + '</dd>' +
       '<dt>GPU</dt><dd style="font-size:11.5px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(GPU_NAME) + '">' + esc(GPU_NAME) + '</dd>';
   }
   setInterval(function () { if (ui.stage === 'stitch') updatePerf(); }, 500);
   function applyLook() {
+    if ((shared.uLevel.value >= 3) !== (ui.fidelity >= 3)) { doc.layers.forEach(function (L) { if (rt(L.id).result) buildLayerMesh(L); }); if (ui.copies > 1) rebuildCopies(); } // swap stitch geometry
     shared.uLevel.value = ui.fidelity;
     shared.uTwist.value = ui.twist / 25.4;
     shared.uSharp.value = ui.sharp;

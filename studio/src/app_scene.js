@@ -27,7 +27,7 @@
   // ---- thread ribbons: one instanced draw per layer, shading in world space ----
   var threadVS = [
     'attribute vec3 iA; attribute vec3 iB; attribute vec3 iMisc; attribute vec3 iCol;',
-    'uniform float uWidth; uniform float uPile;',
+    'uniform float uWidth; uniform float uPile; uniform float uLevel;',
     'varying vec3 vW; varying vec3 vT; varying vec3 vS; varying vec2 vUV; varying float vLen; varying float vAO; varying float vSeed; varying vec3 vCol; varying float vMat;',
     'void main(){',
     '  float u = position.x; float v = position.y;',
@@ -36,7 +36,10 @@
     '  float a = max(sin(3.14159 * u), 0.002);',
     '  float z = mix(iA.z, iB.z, u) + h * pow(a, 0.55);',
     '  float slope = clamp(h * 0.55 * pow(a, -0.45) * 3.14159 * cos(3.14159 * u) / len, -3.0, 3.0);',
-    '  vec3 pos = vec3(mix(iA.xy, iB.xy, u) + side * v * uWidth * 0.5, z);',
+    '  float endD = min(u, 1.0 - u) * len;',
+    '  float pinch = uLevel > 2.5 ? mix(0.62, 1.0, smoothstep(0.0, 0.32, endD)) : 1.0;',
+    '  float bulge = uLevel > 2.5 ? uWidth * 0.30 * pinch * sqrt(max(1.0 - v * v, 0.0)) * smoothstep(0.0, 0.2, endD) : 0.0;',
+    '  vec3 pos = vec3(mix(iA.xy, iB.xy, u) + side * v * uWidth * 0.5 * pinch, z + bulge);',
     '  mat3 m3 = mat3(modelMatrix);',
     '  vT = normalize(m3 * vec3(dir, slope)); vS = normalize(m3 * vec3(side, 0.0));',
     '  vUV = vec2(u, v); vLen = len; vAO = iMisc.x; vSeed = iMisc.y; vCol = iCol; vMat = iMisc.z;',
@@ -45,7 +48,7 @@
     '}'
   ].join('\n');
   var threadFS = [
-    'uniform vec3 uLight; uniform float uLevel; uniform float uTwist; uniform float uSharp; uniform float uSpec; uniform float uOut; uniform float uDim;',
+    'uniform vec3 uLight; uniform float uLevel; uniform float uTwist; uniform float uSharp; uniform float uSpec; uniform float uOut; uniform float uDim; uniform float uWidth;',
     'varying vec3 vW; varying vec3 vT; varying vec3 vS; varying vec2 vUV; varying float vLen; varying float vAO; varying float vSeed; varying vec3 vCol; varying float vMat;',
     'void main(){',
     '  float metal = step(2.5, vMat);',
@@ -57,12 +60,34 @@
     '  float vv = clamp(vUV.y, -1.0, 1.0);',
     '  vec3 N = N0;',
     '  if (uLevel > 0.5) N = normalize(N0 * sqrt(max(1.0 - vv * vv * 0.9, 0.0)) + S * vv * 0.95);',
-    '  float stripe = 1.0;',
-    '  if (uLevel > 1.5) { float ph = vUV.x * vLen * uTwist + vv * 0.6 + vSeed; stripe = 0.84 + 0.16 * (0.5 + 0.5 * sin(6.2832 * ph)); }',
+    '  float stripe = 1.0, occ = 1.0, fib = 1.0, jit = 1.0, spec2 = 0.0; vec3 Bd = T;',
+    '  if (uLevel > 1.5 && uLevel < 2.5) { float ph = vUV.x * vLen * uTwist + vv * 0.6 + vSeed; stripe = 0.84 + 0.16 * (0.5 + 0.5 * sin(6.2832 * ph)); }',
+    // Ultra: two plies twisted round each other at ~35 degrees, each a rounded strand with a groove between,
+    // fine fibres running the other way, and per-stitch variation in how the thread lies
+    '  if (uLevel > 2.5) {',
+    '    float sAl = vUV.x * vLen, tAc = vv * 0.5 * uWidth;',
+    '    float P = 0.5 / max(uTwist, 0.05);',
+    '    float f = fract((sAl - tAc * 1.43) / P + vSeed * 3.0);',
+    '    Bd = normalize(T * 0.819 + S * 0.574);',
+    '    vec3 Q = normalize(cross(N0, Bd));',
+    '    N = normalize(N + Q * (f - 0.5) * 1.7);',
+    '    occ = 0.6 + 0.4 * pow(max(sin(3.14159 * f), 0.0), 0.7);',
+    '    float fc = (sAl * 0.94 + tAc * 0.34) / 0.03;',
+    '    float fa = clamp(1.0 - fwidth(fc) * 1.5, 0.0, 1.0);',
+    '    fib = 1.0 - 0.1 * fa * (0.5 + 0.5 * sin(6.2832 * fc + vSeed * 20.0));',
+    '    jit = 1.0 + (vSeed - 0.5) * 0.07;',
+    '  }',
     '  vec3 L = normalize(uLight); vec3 V = normalize(cameraPosition - vW);',
     '  float dif = clamp((dot(N, L) + 0.35) / 1.35, 0.0, 1.0);',
     '  float spec = 0.0;',
-    '  if (uLevel > 0.5) {',
+    '  if (uLevel > 2.5) {',
+    '    vec3 Hh = normalize(L + V);',
+    '    vec3 T1 = normalize(Bd + N * 0.08), T2 = normalize(Bd - N * 0.12);',
+    '    float t1 = dot(T1, Hh), t2 = dot(T2, Hh);',
+    '    float lit = smoothstep(-0.2, 0.35, dot(N0, L)) * (0.5 + 0.5 * occ);',
+    '    spec = pow(sqrt(max(0.0, 1.0 - t1 * t1)), uSharp * sharpK * 1.6) * uSpec * specK * lit;',
+    '    spec2 = pow(sqrt(max(0.0, 1.0 - t2 * t2)), uSharp * sharpK * 0.5) * uSpec * specK * 0.45 * lit;',
+    '  } else if (uLevel > 0.5) {',
     '    vec3 Tt = normalize(T + N * (stripe - 0.92) * 1.6);',
     '    vec3 Hh = normalize(L + V); float th = dot(Tt, Hh);',
     '    spec = pow(sqrt(max(0.0, 1.0 - th * th)), uSharp * sharpK) * uSpec * specK * smoothstep(-0.2, 0.35, dot(N0, L));',
@@ -70,9 +95,9 @@
     '  float k = clamp(0.22 / vLen, 0.02, 0.35);',
     '  float e = smoothstep(0.0, k, vUV.x) * smoothstep(1.0, 1.0 - k, vUV.x);',
     '  float edge = 1.0 - 0.22 * vv * vv;',
-    '  float shade = (0.34 + 0.76 * dif) * vAO * mix(0.68, 1.0, e) * stripe * edge;',
+    '  float shade = (0.34 + 0.76 * dif) * vAO * mix(0.68, 1.0, e) * stripe * edge * occ * fib * jit;',
     '  vec3 specCol = mix(vec3(1.0, 0.98, 0.95), vCol * 1.5 + 0.08, metal);',
-    '  vec3 col = vCol * shade * (1.0 - 0.5 * metal) + specCol * spec * mix(0.4, 1.0, e);',
+    '  vec3 col = vCol * shade * (1.0 - 0.5 * metal) + specCol * spec * mix(0.4, 1.0, e) + vCol * spec2 * mix(0.3, 1.0, e);',
     '  if (uOut > 0.5) { float hs = step(0.5, fract((vW.x - vW.y) / 3.0)); col = mix(col, vec3(0.93, 0.55, 0.02), 0.5 * hs); }',
     '  col = mix(col, vec3(0.5), uDim);',
     '  gl_FragColor = vec4(pow(max(col, 0.0), vec3(1.0 / 2.2)), 1.0);',
@@ -86,14 +111,19 @@
     return new THREE.ShaderMaterial({ vertexShader: threadVS, fragmentShader: threadFS, side: THREE.DoubleSide,
       uniforms: Object.assign({}, shared, { uOut: { value: 0 }, uDim: { value: 0 } }) });
   }
-  var SEG = 6, TEMPLATE = new THREE.BufferGeometry();
-  (function () {
-    var pos = [], idx = [];
-    for (var i = 0; i <= SEG; i++) pos.push(i / SEG, -1, 0, i / SEG, 1, 0);
-    for (var j = 0; j < SEG; j++) { var a = j * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
-    TEMPLATE.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    TEMPLATE.setIndex(idx);
-  })();
+  function ribbonTemplate(along, across) {
+    var g = new THREE.BufferGeometry(), pos = [], idx = [];
+    for (var i = 0; i <= along; i++) for (var j = 0; j <= across; j++) pos.push(i / along, -1 + 2 * j / across, 0);
+    for (var a = 0; a < along; a++) for (var b = 0; b < across; b++) {
+      var p = a * (across + 1) + b, q = p + across + 1;
+      idx.push(p, q, p + 1, p + 1, q, q + 1);
+    }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+    g.userData.tris = along * across * 2;
+    return g;
+  }
+  var TEMPLATE = ribbonTemplate(6, 1), TEMPLATE_ULTRA = ribbonTemplate(16, 6);
+  function threadTemplate() { return ui.fidelity >= 3 ? TEMPLATE_ULTRA : TEMPLATE; }
   var layerRoot = new THREE.Group(); scene.add(layerRoot);
 
   function buildLayerMesh(L) {
@@ -115,7 +145,7 @@
       });
     });
     var g = new THREE.InstancedBufferGeometry();
-    g.setAttribute('position', TEMPLATE.getAttribute('position')); g.setIndex(TEMPLATE.getIndex());
+    var TT = threadTemplate(); g.setAttribute('position', TT.getAttribute('position')); g.setIndex(TT.getIndex());
     g.setAttribute('iA', new THREE.InstancedBufferAttribute(A3, 3));
     g.setAttribute('iB', new THREE.InstancedBufferAttribute(B3, 3));
     g.setAttribute('iMisc', new THREE.InstancedBufferAttribute(M3, 3));
@@ -452,7 +482,8 @@
   function requestDraw() { dirty = true; }
   function resize() {
     var r = canvas.getBoundingClientRect();
-    var scale = ui.fidelity === 0 ? 0.75 : 1, dpr = Math.min(window.devicePixelRatio || 1, ui.fidelity === 2 ? 2 : 1.25) * scale;
+    // Ultra renders above screen resolution (supersampling) so fine ply and fibre detail stays smooth
+    var scale = ui.fidelity === 0 ? 0.75 : 1, dpr = ui.fidelity >= 3 ? Math.min((window.devicePixelRatio || 1) * 1.5, 3) : Math.min(window.devicePixelRatio || 1, ui.fidelity === 2 ? 2 : 1.25) * scale;
     renderer.setPixelRatio(dpr); renderer.setSize(Math.max(1, r.width), Math.max(1, r.height), false);
     persp.aspect = Math.max(1, r.width) / Math.max(1, r.height); persp.updateProjectionMatrix();
     ui.resText = Math.round(r.width * dpr) + ' × ' + Math.round(r.height * dpr);
