@@ -146,8 +146,21 @@
     return { stroke: { on: true, width: 1.5 }, stroke2: { on: false, width: 1.5 }, shadow: { on: false, dist: 1.8, angle: -45 }, stripes: { on: false, mode: 'solid', dir: 'h', dither: 'diffusion' } };
   }
   function themeColors(t) { return { fill: t.fill, stroke: t.stroke, stroke2: t.stroke2, shadow: t.shadow, bands: t.bands ? t.bands.slice() : null, recolor: {} }; }
+  // colours end up in style attributes and markup, so anything loaded from storage must be a plain #rrggbb
+  function safeHex(v, fallback) { return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : fallback; }
+  function cleanColours(L) {
+    var c = L.colors = L.colors && typeof L.colors === 'object' ? L.colors : {};
+    ['fill', 'stroke', 'stroke2', 'shadow'].forEach(function (k) { c[k] = safeHex(c[k], '#888888'); });
+    c.bands = Array.isArray(c.bands) ? c.bands.map(function (h) { return safeHex(h, null); }).filter(Boolean) : null;
+    if (c.bands && c.bands.length < 2) c.bands = null;
+    var rc = {};
+    if (c.recolor && typeof c.recolor === 'object') Object.keys(c.recolor).forEach(function (k) { var a = safeHex(k, null), b = safeHex(c.recolor[k], null); if (a && b) rc[a] = b; });
+    c.recolor = rc;
+    if (L.fx) ['stroke', 'stroke2', 'shadow'].forEach(function (k) { if (L.fx[k] && L.fx[k].color !== undefined) L.fx[k].color = safeHex(L.fx[k].color, undefined); });
+  }
   // older saved designs predate stripes
   function normaliseLayer(L) {
+    cleanColours(L);
     L.fx.stripes = L.fx.stripes || { on: false, dir: 'h' };
     var st = L.fx.stripes;
     st.mode = st.on ? (st.mode && st.mode !== 'solid' ? st.mode : 'stripes') : 'solid';

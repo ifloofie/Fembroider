@@ -36,7 +36,7 @@
     var m = Math.max(1, Math.ceil(min));
     return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') + ' min';
   }
-  function threadLabel(hex) { var t = threadFor(hex); return t ? esc(t.name) + ' <small>' + esc(t.code) + '</small>' : hex; }
+  function threadLabel(hex) { var t = threadFor(hex); return t ? esc(t.name) + ' <small>' + esc(t.code) + '</small>' : esc(String(hex)); }
 
   // ---------- generic bindings: data-k is a path into the selected layer (L.), the document (doc.) or view settings (ui.) ----------
   function rootOf(k) { var h = k.split('.')[0]; return h === 'L' ? selLayer() : h === 'doc' ? doc : ui; }

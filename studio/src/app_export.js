@@ -467,6 +467,8 @@
       if (!d || !Array.isArray(d.layers)) return false;
       Object.keys(o.sources || {}).forEach(function (id) { var s = o.sources[id]; SOURCES.set(id, { kind: 'svg', svg: s.svg, name: s.name, thumb: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s.svg) }); });
       d.layers.forEach(normaliseLayer);
+      d.fabric = safeHex(d.fabric, doc.fabric);
+      if (typeof d.cardName !== 'string' || !/^[A-Z0-9_]{0,8}$/i.test(d.cardName)) d.cardName = '';
       if (!d.stitch || d.stitch.v !== 2) d.stitch = Object.assign({}, doc.stitch, { fillMode: (d.stitch && d.stitch.fillMode) || 'patch' });
       d.threads = Object.assign({}, doc.threads, d.threads || {});
       if (!LINES[d.threads.line]) d.threads.line = 'janome';
