@@ -582,7 +582,7 @@
     }
     if (ui.stage === 'design') { btn.textContent = 'Next: Stitch settings'; btn.disabled = !doc.layers.length; }
     else if (ui.stage === 'stitch') { btn.textContent = 'Next: Export'; btn.disabled = !doc.layers.length; }
-    else { btn.textContent = 'Save card files'; btn.disabled = !canExport(); }
+    else { btn.textContent = machine().media === 'memory card' ? 'Save card files' : 'Save machine files'; btn.disabled = !canExport(); }
   }
   function canExport() { return !!(doc.layers.length && fitState.ok && lastSeq && !seqStale && !anyBusy()); }
 
@@ -723,33 +723,99 @@
     for (var i = 0; i < keys.length; i++) { var f = m.hoops[keys[i]].field; if (bw <= f[0] - 2 && bh <= f[1] - 2) return keys[i]; }
     return keys[keys.length - 1];
   }
+  var recentMachines = (function () {
+    try { var r = JSON.parse(localStorage.getItem('stitch.recentMachines') || '[]'); return Array.isArray(r) ? r.filter(function (id) { return typeof id === 'string' && MACHINES[id]; }).slice(0, 5) : []; } catch (e) { return []; }
+  })();
+  function rememberMachine(id) {
+    recentMachines = [id].concat(recentMachines.filter(function (x) { return x !== id; })).slice(0, 5);
+    try { localStorage.setItem('stitch.recentMachines', JSON.stringify(recentMachines)); } catch (e) {}
+  }
   function setMachine(id) {
     if (!MACHINES[id] || id === doc.machine) return;
-    doc.machine = id; doc.hoop = bestHoop(MACHINES[id]);
+    doc.machine = id; doc.hoop = bestHoop(MACHINES[id]); rememberMachine(id);
     machineChanged(); renderPanel(); commit();
     toast(MACHINES[id].name + ' · ' + HOOPS[doc.hoop].name);
   }
   function setHoop(k) { if (!HOOPS[k]) return; doc.hoop = k; styleHoops(); updateFit(); goTo(ui.view === 'custom' ? '3d' : ui.view); renderPanel(); commit(); }
+
+  // machine picker: search across the whole catalogue, filter by type, recent machines first, then brand by brand
+  ui.machineFilter = 'all';
+  var MFILTERS = [['all', 'All'], ['home', 'Home'], ['multi', 'Multi-needle'], ['comm', 'Commercial']];
+  function machineMatchesFilter(m) {
+    var f = ui.machineFilter;
+    return f === 'all' || (f === 'home' && (m.kind === 'C' || m.kind === 'E')) || (f === 'multi' && m.kind === 'M') || (f === 'comm' && (m.kind === 'P' || m.kind === 'H'));
+  }
+  function machineItem(id, full) {
+    var m = MACHINES[id], k = StitchMachines.KINDS[m.kind];
+    var detail = (m.aka ? m.aka + ' · ' : '') + k + (typeof m.needles !== 'number' || m.needles > 1 ? ' · ' + m.needles + ' needles' : '') +
+      (m.heads && m.heads !== 1 ? ' · ' + m.heads + ' heads' : '') + (m.cur ? '' : ' · discontinued');
+    return '<button type="button" class="mitem" role="menuitemradio" data-machine="' + id + '" aria-checked="' + String(id === doc.machine) + '"><span class="ck"></span><b>' + esc(full ? m.name : m.model) +
+      '</b><span class="tag">' + esc(m.format) + ' · ' + m.max[0] + '×' + m.max[1] + '</span><small>' + esc(detail) + '</small></button>';
+  }
+  function machineListHtml(q) {
+    var all = StitchMachines.search(q), ids = all.filter(function (id) { return machineMatchesFilter(MACHINES[id]); }), widened = false;
+    // a search that finds nothing of the chosen type shows matches of every type rather than an empty list
+    if (!ids.length && all.length && String(q || '').trim()) { ids = all; widened = true; }
+    if (!ids.length) return '<p class="mempty">No machines match <b>' + esc(q || MFILTERS.filter(function (f) { return f[0] === ui.machineFilter; })[0][1]) + '</b>. Try a model number such as PE800, a brand, or a file format such as PES.</p>';
+    var html = '', searching = !!String(q || '').trim();
+    var fname = MFILTERS.filter(function (f) { return f[0] === ui.machineFilter; })[0][1].toLowerCase();
+    if (widened) html += '<p class="mcount">No ' + esc(fname) + ' machines match. Showing ' + ids.length + ' of every type.</p>';
+    else if (searching) html += '<p class="mcount">' + ids.length + (ids.length === 1 ? ' machine' : ' machines') + '</p>';
+    else {
+      var rec = [doc.machine].concat(recentMachines.filter(function (id) { return id !== doc.machine; })).filter(function (id) { return machineMatchesFilter(MACHINES[id]); }).slice(0, 5);
+      if (rec.length) html += '<h5 class="mbrand">Recent</h5>' + rec.map(function (id) { return machineItem(id, true); }).join('');
+    }
+    StitchMachines.BRANDS.forEach(function (b) {
+      var group = ids.filter(function (id) { return MACHINES[id].brand === b; });
+      if (group.length) html += '<h5 class="mbrand">' + esc(b) + '</h5>' + group.map(function (id) { return machineItem(id, false); }).join('');
+    });
+    return html;
+  }
+  function hoopListHtml() {
+    var M = machine();
+    return '<h4>Hoop · ' + esc(M.name) + '</h4><div class="mhoops">' + Object.keys(HOOPS).map(function (k) {
+      var H = HOOPS[k];
+      return '<button type="button" class="mitem" role="menuitemradio" data-hoopk="' + k + '" aria-checked="' + String(k === doc.hoop) + '"><span class="ck"></span><b>' + esc(H.name) + '</b><span class="tag">' + H.field[0] + ' × ' + H.field[1] + ' mm</span></button>';
+    }).join('') + '</div>' + (M.ver ? '' : '<p class="mhint">These are the standard hoops for this machine’s sewing field. Check your manual for the exact set.</p>');
+  }
   function openMachinePop() {
     closePop();
     var btn = $('machineBtn'), r = btn.getBoundingClientRect(), p = document.createElement('div');
     p.className = 'machinepop'; p.setAttribute('role', 'dialog'); p.setAttribute('aria-label', 'Machine and hoop');
-    p.innerHTML = '<h4>Machine</h4>' + Object.keys(MACHINES).map(function (id) {
-      var m = MACHINES[id], big = Object.keys(m.hoops).reduce(function (a, k) { var f = m.hoops[k].field; return f[0] * f[1] > a[0] * a[1] ? f : a; }, [0, 0]);
-      return '<button type="button" class="mitem" role="menuitemradio" data-machine="' + id + '" aria-checked="' + String(id === doc.machine) + '"><span class="ck"></span><b>' + esc(m.name) + '</b><span class="tag">' + esc(m.format) + ' · ' + big[0] + '×' + big[1] + '</span><small>' + esc(m.blurb) + '</small></button>';
-    }).join('') + '<div class="msep"></div><h4>Hoop · ' + esc(machine().name) + '</h4>' + Object.keys(HOOPS).map(function (k) {
-      var H = HOOPS[k];
-      return '<button type="button" class="mitem" role="menuitemradio" data-hoopk="' + k + '" aria-checked="' + String(k === doc.hoop) + '"><span class="ck"></span><b>' + esc(H.name) + '</b><span class="tag">' + H.field[0] + ' × ' + H.field[1] + ' mm</span></button>';
-    }).join('');
+    p.innerHTML = '<div class="msearch"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16 16 4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
+      '<input type="search" id="mSearch" placeholder="Search ' + StitchMachines.ORDER.length + ' machines: brand, model or format" aria-label="Search machines" autocomplete="off" spellcheck="false"></div>' +
+      '<div class="mfilters" role="group" aria-label="Machine type">' + MFILTERS.map(function (f) { return '<button type="button" data-mfilter="' + f[0] + '" aria-pressed="' + String(f[0] === ui.machineFilter) + '">' + f[1] + '</button>'; }).join('') + '</div>' +
+      '<div class="mlist" id="mList">' + machineListHtml('') + '</div><div class="msep"></div><div id="mHoops">' + hoopListHtml() + '</div>';
     document.body.appendChild(p);
-    p.style.left = Math.max(12, Math.min(window.innerWidth - p.offsetWidth - 12, r.left)) + 'px'; p.style.top = (r.bottom + 6) + 'px';
+    var top = r.bottom + 6;
+    p.style.left = Math.max(12, Math.min(window.innerWidth - p.offsetWidth - 12, r.left)) + 'px'; p.style.top = top + 'px';
+    p.style.maxHeight = (window.innerHeight - top - 12) + 'px';
     pop = p; btn.setAttribute('aria-expanded', 'true');
+    var input = $('mSearch'), list = $('mList');
+    function refresh() { list.innerHTML = machineListHtml(input.value); list.scrollTop = 0; }
+    input.addEventListener('input', refresh);
     p.addEventListener('click', function (e) {
-      var m = e.target.closest('[data-machine]'), h = e.target.closest('[data-hoopk]');
-      if (m) { setMachine(m.dataset.machine); closePop(); }
-      else if (h) { setHoop(h.dataset.hoopk); closePop(); }
+      var m = e.target.closest('[data-machine]'), h = e.target.closest('[data-hoopk]'), f = e.target.closest('[data-mfilter]');
+      if (f) { ui.machineFilter = f.dataset.mfilter; p.querySelectorAll('[data-mfilter]').forEach(function (b) { b.setAttribute('aria-pressed', String(b === f)); }); refresh(); return; }
+      if (m) { setMachine(m.dataset.machine); closePop(); btn.focus(); }
+      else if (h) { setHoop(h.dataset.hoopk); closePop(); btn.focus(); }
     });
-    var f = p.querySelector('[aria-checked="true"]'); if (f) f.focus();
+    // arrow keys move through the results; Enter in the search box picks the first match
+    p.addEventListener('keydown', function (e) {
+      e.stopPropagation(); // keys typed here never reach the canvas shortcuts (undo, nudge, delete)
+      if (e.key === 'Escape') { closePop(); btn.focus(); return; }
+      var items = Array.prototype.slice.call(p.querySelectorAll('.mitem')), at = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!items.length) return;
+        if (e.target === input) { if (e.key === 'ArrowDown') items[0].focus(); return; }
+        var n = at + (e.key === 'ArrowDown' ? 1 : -1);
+        if (n < 0) input.focus(); else items[Math.min(items.length - 1, n)].focus();
+      } else if (e.key === 'Enter' && e.target === input) {
+        e.preventDefault(); var first = list.querySelector('[data-machine]'); if (first) first.click();
+      }
+    });
+    input.focus();
   }
   $('machineBtn').addEventListener('click', function (e) { e.stopPropagation(); if (pop && pop.classList.contains('machinepop')) closePop(); else openMachinePop(); });
 

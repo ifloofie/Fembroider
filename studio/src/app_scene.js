@@ -238,10 +238,24 @@
     } });
   var plate = new THREE.Mesh(new THREE.PlaneGeometry(PLATE[0], PLATE[1]), plateMat);
   plate.position.z = -0.05; scene.add(plate);
-  (function () {
+  var axes = (function () {
     var o = new THREE.Vector3(-PLATE[0] / 2 + 8, -PLATE[1] / 2 + 8, 0.2);
-    [[1, 0, 0, 0xd8322b], [0, 1, 0, 0x2f9a3a], [0, 0, 1, 0x2f6fe0]].forEach(function (a) { scene.add(new THREE.ArrowHelper(new THREE.Vector3(a[0], a[1], a[2]), o, 22, a[3], 5, 3)); });
+    return [[1, 0, 0, 0xd8322b], [0, 1, 0, 0x2f9a3a], [0, 0, 1, 0x2f6fe0]].map(function (a) { var h = new THREE.ArrowHelper(new THREE.Vector3(a[0], a[1], a[2]), o, 22, a[3], 5, 3); scene.add(h); return h; });
   })();
+  // the work surface grows to hold the machine's largest hoop (commercial frames reach 70 cm)
+  function sizePlate() {
+    var w = 330, h = 380;
+    Object.keys(HOOPS).forEach(function (k) { var H = HOOPS[k]; w = Math.max(w, H.field[0] + H.open + 116); h = Math.max(h, H.field[1] + H.open + 136); });
+    if (w === PLATE[0] && h === PLATE[1]) return;
+    PLATE = [w, h];
+    var px = Math.min(2, 1600 / Math.max(w, h));
+    shadowCanvas.width = Math.round(w * px); shadowCanvas.height = Math.round(h * px);
+    shadowTex.dispose(); shadowTex = new THREE.CanvasTexture(shadowCanvas); shadowTex.minFilter = THREE.LinearFilter; shadowTex.magFilter = THREE.LinearFilter;
+    plateMat.uniforms.uShadow.value = shadowTex; plateMat.uniforms.uPlate.value.set(w / 2, h / 2);
+    plate.geometry.dispose(); plate.geometry = new THREE.PlaneGeometry(w, h);
+    axes.forEach(function (a) { a.position.set(-w / 2 + 8, -h / 2 + 8, 0.2); });
+    scheduleShadow();
+  }
 
   var shadowPending = false;
   function scheduleShadow() { if (!shadowPending) { shadowPending = true; requestAnimationFrame(drawShadow); } }
@@ -295,6 +309,7 @@
   var hoopObjs = {};
   // hoop frames for the current machine; rebuilt when the machine changes
   function buildHoops() {
+  sizePlate();
   Object.keys(hoopObjs).forEach(function (k) {
     var g = hoopObjs[k]; scene.remove(g);
     g.traverse(function (o) { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });

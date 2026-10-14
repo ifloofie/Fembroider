@@ -1,7 +1,9 @@
-# Stitch Studio — source (v0.11.0)
+# Stitch Studio — source (v0.12.0)
 
-Embroidery digitizer and 3D stitch preview. Machines: Bernina Deco 330 (EXP+ on a memory card) and
-Poolin EOC06 (DST). Text with 50 fonts and swoops, the full emoji table, imported SVG/bitmaps, Pride
+Embroidery digitizer and 3D stitch preview. Machines: 197 home and commercial models from 17 brands (Brother,
+Baby Lock, Janome, Elna, BERNINA, bernette, PFAFF, Husqvarna Viking, Singer, Poolin, Tajima, Barudan, Happy, SWF,
+ZSK, Melco, Ricoma), each with its hoops and its own file format: PES, JEF, EXP + INF, VP3, XXX or DST, plus the
+Bernina Deco 330's EXP+ card set. Text with 50 fonts and swoops, the full emoji table, imported SVG/bitmaps, Pride
 colourways, stripes and dithered gradients, thread/needle/fabric-aware density, a PBR texture bake, and a
 Windows desktop build.
 
@@ -11,7 +13,8 @@ Code licence: MIT (see `LICENSE`). Bundled fonts, emoji artwork and thread chart
 
     studio/                  the app and the stitch engine (plain JavaScript, no framework)
       src/engine.js          masks → islands → tatami / satin / outline chords, underlay, swoops, travel grids
-      src/export.js          sewing order (left-to-right sweep), travel routing, EXP / INF v2 / JEF / DST / BMP writers, zip
+      src/export.js          sewing order (left-to-right sweep), travel routing, EXP / INF / JEF / DST / PES / VP3 / XXX / BMP writers, zip
+      src/machines.js        machine catalogue: models, hoops, file format, trimming, speed (searchable from the top bar)
       src/app_*.js           UI: core state + machines, threads, 3D scene, direction tool, tips, panels, export & bake
       src/index.html         page template and CSS
       src/assets.gen.js      generated: fonts, themes, thread charts, packed emoji (from build_assets.py)
@@ -51,6 +54,7 @@ Desktop (Windows installer):
 
     cd studio
     node test/t_export.mjs        # likewise t_bands, t_gradient, t_threads, t_effects, t_fonts, t_emoji, t_import
+    node test/t_formats.mjs && python3 test/check_formats.py   # every format read back with pyembroidery
     node test/quality.mjs         # stitch-quality harness (coverage, show-through, crossings, edge angles)
     python3 test/ui.py            # headless browser run of the whole app (needs Playwright + Chromium)
 

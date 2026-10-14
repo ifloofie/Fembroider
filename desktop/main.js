@@ -11,7 +11,7 @@ const { pathToFileURL } = require('url');
 const PAGE = path.join(__dirname, 'app', 'index.html');
 const PAGE_URL = pathToFileURL(PAGE).href;
 const SAVE_NAME = /^[\w .()\-]{1,80}\.(zip|png|txt|exp|inf|bmp|jef|dst)$/i;
-const CARD_NAME = /^[A-Z0-9_]{1,8}\.(EXP|INF|BMP|DST)$/;
+const CARD_NAME = /^[A-Z0-9_]{1,8}\.(EXP|INF|BMP|DST|PES|JEF|VP3|XXX)$/;
 const KIND = { zip: 'ZIP archive', png: 'PNG image', txt: 'Text', exp: 'Melco/Bernina EXP', inf: 'Bernina INF', bmp: 'Bitmap', jef: 'Janome JEF', dst: 'Tajima DST' };
 
 function fromPage(e) {
@@ -70,8 +70,8 @@ if (!app.requestSingleInstanceLock()) {
     return { ok: true, path: r.filePath };
   });
 
-  // Write the machine's files: the Deco 330's EXP + INF + BMP into the card's EmbF5 folder, or a Poolin DST
-  // straight onto the chosen USB stick or folder.
+  // Write the machine's files: the Deco 330's EXP + INF + BMP into the card's EmbF5 folder, or any other machine's
+  // file (PES, JEF, VP3, XXX, DST, or BERNINA EXP + INF) straight onto the chosen USB stick or folder.
   ipcMain.handle('stitch:write-card', async (e, payload) => {
     if (!fromPage(e)) return { error: 'Blocked.' };
     const files = Array.isArray(payload) ? payload : (payload && payload.files);

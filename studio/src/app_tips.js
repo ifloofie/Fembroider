@@ -38,7 +38,7 @@
     'L.fx.shadow.angle': ['Shadow direction', 'Which way the shadow falls.'],
     'L.colors.shadow': ['Shadow colour', 'Thread for the drop shadow.'],
     'doc.fabric': ['Fabric colour', 'The colour of your garment. Used in the preview, and very dark or very light fabric makes Auto sew a little denser so the fabric doesn’t show through.'],
-    'doc.hoop': ['Hoop', 'The hoop you will use on the selected machine. The dashed line is its sewing field; the design must fit inside it to export.'],
+    'doc.hoop': ['Hoop', 'The hoop you will use on the selected machine. The dashed line is its sewing field; the design must fit inside it to export. Pick the machine from the button at the top left: search by brand, model or file format.'],
     'ui.allHoops': ['Other hoops', 'Shows the other hoop outlines for comparison.'],
     'ui.themeGroup': ['Colourway group', 'Classic team-style colourways, or Pride flags with several colourways each.'],
     'L.tf.x': ['X position', 'Horizontal position of the layer’s centre, from the hoop centre (mm).'],
@@ -73,6 +73,7 @@
     // export
     'doc.cardName': ['File name', 'Up to 8 letters, numbers or underscores. This is the name the machine shows on its screen.'],
     'doc.formats.exp': ['Bernina EXP+', 'Also saves the Deco 330 set (EXP, INF, BMP) in an EmbF5 folder.'],
+    'doc.formats.pes': ['Brother PES', 'Also saves a PES file, for Brother and Baby Lock machines.'],
     'doc.formats.jef': ['Janome JEF', 'Also saves a JEF file, for Janome machines and many others.'],
     'doc.formats.dst': ['Tajima DST', 'Also saves a DST file, the format most commercial machines and digitizers read.'],
     'doc.formats.sheet': ['Worksheet', 'A text sheet with the colour order, thread numbers, needle, backing and loading steps.'],

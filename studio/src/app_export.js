@@ -46,13 +46,15 @@
   function exportHtml() {
     var name = exportName(), H = HOOPS[doc.hoop], s = lastSeq, ready = canExport();
     var cid = 'f' + (++fid);
-    var M = machine(), deco = M.id === 'deco330';
+    var M = machine(), deco = M.fmt === 'exp-deco';
+    var exts = primaryExts(M), shown = exts.map(function (e) { return '.' + e; }).join(', ');
     var machine_ = sec('machine', 'machine', 'Machine & files', esc(M.format),
       '<dl class="kv"><dt>Machine</dt><dd>' + esc(M.name) + '</dd><dt>Format</dt><dd>' + esc(M.files) + '</dd>' + (M.folder ? '<dt>Card folder</dt><dd>' + esc(M.folder) + '</dd>' : '<dt>Copy to</dt><dd>' + esc(M.media) + '</dd>') + '<dt>Hoop</dt><dd>' + esc(H.name) + '</dd></dl>' +
       row('File name', '<div class="ctl"><input class="field" id="' + cid + '" data-k="doc.cardName" data-upper maxlength="8" placeholder="' + esc(name) + '" value="' + esc(doc.cardName) + '" style="font-family:var(--font-data);text-transform:uppercase"></div>', cid) +
-      '<p class="note">Up to 8 letters, digits or underscores — the machine shows this name. ' + (deco ? 'Files: <b style="font-family:var(--font-data)"><span id="cardNote">' + esc(name) + '</span>.EXP</b>, .INF and .BMP.' : 'File: <b style="font-family:var(--font-data)"><span id="cardNote">' + esc(name) + '</span>.DST</b>.') + ' Pick another machine from the top bar.</p>' +
+      '<p class="note">Up to 8 letters, digits or underscores — the machine shows this name. Files: <b style="font-family:var(--font-data)"><span id="cardNote">' + esc(name) + '</span>' + esc(shown.slice(0, shown.indexOf(',') < 0 ? shown.length : shown.indexOf(','))) + '</b>' + (exts.length > 1 ? ' and ' + esc(exts.slice(1).map(function (e) { return '.' + e; }).join(', ')) : '') + '.' +
+      (M.fmt === 'dst' && (typeof M.needles !== 'number' || M.needles > 1) ? ' DST carries no thread colours: set the needle for each colour on the machine.' : '') + ' Pick another machine from the top bar.</p>' +
       '<div class="lab" style="font-size:13.5px;font-weight:600">Also include</div>' +
-      (deco ? '' : check('doc.formats.exp', 'Bernina EXP+ (Deco 330)')) + check('doc.formats.jef', 'Janome JEF') + (deco ? check('doc.formats.dst', 'Tajima DST') : '') + check('doc.formats.sheet', 'Worksheet (colour sequence)'));
+      EXTRAS.filter(function (x) { return x[1] !== M.fmt; }).map(function (x) { return check('doc.formats.' + x[0], x[2]); }).join('') + check('doc.formats.sheet', 'Worksheet (colour sequence)'));
     var fit = fitState.empty ? '<p class="note">Add a layer in Design first.</p>' :
       '<div style="display:flex;align-items:center;gap:10px"><span class="pill ' + (fitState.ok ? 'good' : 'bad') + '">' + (fitState.ok ? 'Fits' : 'Does not fit') + '</span><span style="font-size:13.5px">' + esc(fitState.text) + '</span></div>' +
       (fitState.ok ? '' : '<p class="note err">The needle must stay inside the sewing field. Move or shrink the design, or pick a bigger hoop.</p><div class="btnrow"><button type="button" class="btn sm" data-act="goto-design">Back to Design</button></div>');
@@ -64,7 +66,8 @@
     var seqList = '<ol class="seqlist">' + s.blocks.map(function (b) {
       var t = b.thread;
       return '<li><span class="sw" style="background:' + b.color + '"></span><span style="min-width:0"><b>' + (t ? esc(t.name) + ' · ' + t.code : b.color) + '</b><small>' + esc(b.layers.join(', ')) + '</small></span><span class="ct">' + nfmt(b.stitches) + '</span></li>';
-    }).join('') + '</ol>' + (s.threads.length > 1 || s.stats.jumps ? '<p class="note">' + (M.trims ? 'The ' + esc(M.name) + ' stops at each colour change and trims the thread itself. Within a colour the needle works left to right; check the ' + s.stats.jumps + ' jumps and snip any loose ones after sewing.'
+    }).join('') + '</ol>' + (s.threads.length > 1 || s.stats.jumps ? '<p class="note">' + (typeof M.needles !== 'number' || M.needles > 1 ? 'The ' + esc(M.name) + ' changes needle at each colour change and trims the thread itself; set its needle order to match this list. Within a colour the needle works left to right.'
+      : M.trims ? 'The ' + esc(M.name) + ' stops at each colour change and trims the thread itself. Within a colour the needle works left to right; check the ' + s.stats.jumps + ' jumps and snip any loose ones after sewing.'
       : 'The ' + esc(M.name) + ' stops at each colour change. It has no trimmer: within a colour the needle works left to right, so snip the ' + s.stats.jumps + ' jump threads after sewing.') + '</p>' : '');
     var sum = '<dl class="kv"><dt>Stitches</dt><dd>' + nfmt(s.stats.stitches) + '</dd><dt>Colours</dt><dd>' + s.threads.length + '</dd><dt>Colour changes</dt><dd>' + s.stats.colorChanges + '</dd>' +
       '<dt>Jumps</dt><dd>' + s.stats.jumps + '</dd><dt>Hidden travel runs</dt><dd>' + s.stats.travels + '</dd><dt>Design size</dt><dd>' + s.bounds.w.toFixed(1) + ' × ' + s.bounds.h.toFixed(1) + ' mm</dd>' +
@@ -75,8 +78,7 @@
       (desktop && desktop.writeCard ? '<button type="button" class="btn big" data-act="write-card"' + dis + '>' + ic('card') + 'Write to ' + esc(M.media) + '…</button>' : '') +
       '<div class="btnrow"><button type="button" class="btn sm" data-act="save-png"' + dis + '>Preview image (.png)</button>' +
       '<button type="button" class="btn sm" data-act="save-single" data-v="worksheet"' + dis + '>Worksheet (.txt)</button></div>' +
-      (deco ? '<p class="note">To sew: format the card in the machine (it creates the <b>EmbF5</b> folder), copy the three files from the zip’s EmbF5 folder straight into it, then insert the card and choose ' + esc(H.name) + '.</p>'
-        : '<p class="note">To sew: copy <b>' + esc(name) + '.DST</b> to a FAT32 USB stick (or send it over Wi-Fi), open it on the ' + esc(M.name) + ' and fit the ' + esc(H.name) + '.</p>') +
+      '<p class="note">' + loadSteps(M, H, name).map(esc).join(' ').replace(/(\S+\.(EXP|INF|BMP|DST|PES|JEF|VP3|XXX))/g, '<b>$1</b>') + '</p>' +
       (!desktop && !DL ? '<p class="note">If your browser blocks the download, open this page in a normal browser tab.</p>' : ''));
     return machine_ + hoop + sec('seq', 'list', 'Colour sequence', s.blocks.length + ' block' + (s.blocks.length === 1 ? '' : 's'), seqList) + sec('summary', 'report', 'Summary', '', sum) + save + bakeHtml();
   }
@@ -85,29 +87,47 @@
     var c = document.createElement('canvas'); c.width = w; c.height = h;
     var x = c.getContext('2d'); draw(x); return { canvas: c, data: x.getImageData(0, 0, w, h).data };
   }
-  function makeFiles(seq) {
-    var name = exportName(), H = HOOPS[doc.hoop], files = [], listed = [];
-    var bmp = canvasRGBA(160, 120, function (x) { X.drawPreview(seq, x, 160, 120, { lineWidth: 1 }); });
-    var deco = doc.machine === 'deco330', other = 'Other machines/';
-    // the chosen machine's files first (Deco: EmbF5 folder; Poolin: the DST at the top of the zip / stick)
-    if (deco) {
-      files.push({ name: 'EmbF5/' + name + '.EXP', data: X.writeEXP(seq) });
-      files.push({ name: 'EmbF5/' + name + '.INF', data: X.writeINF(seq, { hoop: doc.hoop }) });
-      files.push({ name: 'EmbF5/' + name + '.BMP', data: X.writeBMP(bmp.data, 160, 120) });
-    } else {
-      files.push({ name: name + '.DST', data: X.writeDST(seq, name), primary: true });
-      if (doc.formats.exp) {
-        var decoHoop = H.field[0] <= 126 && H.field[1] <= 110 ? 'A' : 'B';
-        files.push({ name: other + 'EmbF5/' + name + '.EXP', data: X.writeEXP(seq) });
-        files.push({ name: other + 'EmbF5/' + name + '.INF', data: X.writeINF(seq, { hoop: decoHoop }) });
-        files.push({ name: other + 'EmbF5/' + name + '.BMP', data: X.writeBMP(bmp.data, 160, 120) });
-      }
+  // the extra formats offered under "Also include" (the machine's own format is never repeated there)
+  var EXTRAS = [['exp', 'exp-deco', 'Bernina EXP+ (Deco 330)'], ['pes', 'pes', 'Brother / Baby Lock PES'], ['jef', 'jef', 'Janome JEF'], ['dst', 'dst', 'Tajima DST']];
+  function primaryExts(M) { return M.fmt === 'exp-deco' ? ['EXP', 'INF', 'BMP'] : M.fmt === 'exp' ? ['EXP', 'INF'] : [M.ext]; }
+  var threadAlt = function (hex, ex) { return E.nearestThread(hex, ex).index; };
+  function formatFiles(seq, name, fmt, opts) {
+    switch (fmt) {
+      case 'exp-deco': return [['EXP', X.writeEXP(seq)], ['INF', X.writeINF(seq, { hoop: opts.decoHoop })], ['BMP', opts.bmp]];
+      case 'exp': return [['EXP', X.writeEXP(seq)], ['INF', X.writeINF(seq, { v1: true })]];
+      case 'jef': return [['JEF', X.writeJEF(seq, opts.jefHoop ? { hoop: opts.jefHoop, threadAlt: threadAlt } : { auto: true, threadAlt: threadAlt })]];
+      case 'pes': return [['PES', X.writePES(seq, name)]];
+      case 'vp3': return [['VP3', X.writeVP3(seq)]];
+      case 'xxx': return [['XXX', X.writeXXX(seq)]];
+      default: return [['DST', X.writeDST(seq, name)]];
     }
-    if (doc.formats.jef) files.push({ name: other + name + '.JEF', data: X.writeJEF(seq, { hoop: deco ? doc.hoop : 'B', threadAlt: function (hex, ex) { return E.nearestThread(hex, ex).index; } }) });
-    if (deco && doc.formats.dst) files.push({ name: other + name + '.DST', data: X.writeDST(seq, name) });
+  }
+  function makeFiles(seq) {
+    var name = exportName(), H = HOOPS[doc.hoop], M = machine(), files = [], listed = [], other = 'Other machines/';
+    var bmp = canvasRGBA(160, 120, function (x) { X.drawPreview(seq, x, 160, 120, { lineWidth: 1 }); });
+    var bmpData = X.writeBMP(bmp.data, 160, 120), deco = M.fmt === 'exp-deco';
+    var decoHoop = deco ? doc.hoop : (H.field[0] <= 126 && H.field[1] <= 110 ? 'A' : 'B');
+    // the chosen machine's files first, at the top of the zip (the Deco's in its EmbF5 card folder)
+    formatFiles(seq, name, M.fmt, { decoHoop: decoHoop, bmp: bmpData, jefHoop: null }).forEach(function (f) {
+      files.push({ name: (M.folder ? M.folder + '/' : '') + name + '.' + f[0], data: f[1], primary: true });
+    });
+    EXTRAS.forEach(function (x) {
+      if (x[1] === M.fmt || !doc.formats[x[0]]) return;
+      formatFiles(seq, name, x[1], { decoHoop: decoHoop, bmp: bmpData, jefHoop: deco ? doc.hoop : null }).forEach(function (f) {
+        files.push({ name: other + (x[1] === 'exp-deco' ? 'EmbF5/' : '') + name + '.' + f[0], data: f[1] });
+      });
+    });
     files.forEach(function (f) { listed.push(f.name); });
     if (doc.formats.sheet) files.push({ name: name + '_worksheet.txt', data: new TextEncoder().encode(worksheetText(seq, listed)) });
     return { name: name, files: files };
+  }
+  // loading steps for the export panel and the worksheet
+  function loadSteps(M, H, name) {
+    var exts = primaryExts(M);
+    if (M.fmt === 'exp-deco') return ['To sew: format the card in the machine (it creates the EmbF5 folder), copy the three files from the zip’s EmbF5 folder straight into it,', 'then insert the card and choose ' + H.name + '.'];
+    var files = exts.map(function (e) { return name + '.' + e; }), multi = typeof M.needles !== 'number' || M.needles > 1;
+    return ['To sew: copy ' + (files.length > 1 ? files.slice(0, -1).join(', ') + ' and ' + files[files.length - 1] + ' (keep them together)' : files[0]) + ' to a FAT32 USB stick' + (/Wi-Fi/.test(M.note || '') || M.id === 'eoc06' ? ' (or send it over Wi-Fi)' : '') + ',',
+      'open the design on the ' + M.name + ' and fit the ' + H.name + '.' + (multi ? ' Then set a needle for each colour in the order listed.' : '')];
   }
   function worksheetText(seq, listed) {
     var H = HOOPS[doc.hoop], title = doc.layers.map(function (L) { return L.name; }).join(' + ').slice(0, 60) || exportName();
@@ -115,7 +135,9 @@
     var mats = ['Thread    ' + line.brand + ' ' + line.line + ', ' + T.weight + ' wt' + (T.snap ? ' (colours matched to this chart)' : ''),
       'Bobbin    60 or 90 wt bobbin thread', 'Needle    ' + T.needle + ' ' + POINTS[T.point].toLowerCase() + (T.needle !== R.needle || T.point !== R.point ? '  (recommended: ' + R.needle + ' ' + POINTS[R.point].toLowerCase() + ')' : ''),
       'Fabric    ' + FABRICS[T.fabric].label, 'Backing   ' + R.stab];
-    return X.worksheet(seq, { title: title, machine: machine().name, machineId: machine().id, trims: machine().trims, hoopName: H.name + ' (' + H.field[0] + ' x ' + H.field[1] + ' mm)', files: listed, materials: mats });
+    var M = machine();
+    return X.worksheet(seq, { title: title, machine: M.name, machineId: M.id, trims: M.trims, spm: M.spm, hoopName: H.name + ' (' + H.field[0] + ' x ' + H.field[1] + ' mm)', files: listed, materials: mats,
+      load: M.fmt === 'exp-deco' ? null : loadSteps(M, H, exportName()) });
   }
   function previewPngBlob(seq) {
     var w = 1400, h = Math.round(1400 * Math.max(0.35, Math.min(1.4, (seq.bounds.h + 24) / (seq.bounds.w + 24))));
@@ -179,10 +201,9 @@
   function writeToCard() {
     if (!guardExport() || !desktop || !desktop.writeCard) return;
     var out = makeFiles(lastSeq);
-    var deco = doc.machine === 'deco330';
-    var card = deco ? out.files.filter(function (f) { return f.name.indexOf('EmbF5/') === 0; }).map(function (f) { return { name: f.name.slice(6), data: f.data }; })
-      : out.files.filter(function (f) { return f.primary; }).map(function (f) { return { name: f.name, data: f.data }; });
-    desktop.writeCard(card, deco ? 'EmbF5' : '').then(function (r) { report(r, 'Written to the card'); }, function (err) { toast('Could not write to the card: ' + (err && err.message || err)); });
+    var M = machine();
+    var card = out.files.filter(function (f) { return f.primary; }).map(function (f) { return { name: f.name.slice(f.name.lastIndexOf('/') + 1), data: f.data }; });
+    desktop.writeCard(card, M.folder || '').then(function (r) { report(r, 'Written to the card'); }, function (err) { toast('Could not write to the card: ' + (err && err.message || err)); });
   }
 
   // ---------- PBR texture bake (Substance Painter and other PBR tools) ----------
@@ -478,8 +499,9 @@
         return SOURCES.has(L.p.src);
       });
       if (!d.layers.length) return false;
-      if (!MACHINES[d.machine]) d.machine = 'deco330';
-      if (!MACHINES[d.machine].hoops[d.hoop]) d.hoop = MACHINES[d.machine].defaultHoop;
+      if (typeof d.machine !== 'string' || !Object.prototype.hasOwnProperty.call(MACHINES, d.machine)) d.machine = 'deco330';
+      if (typeof d.hoop !== 'string' || !Object.prototype.hasOwnProperty.call(MACHINES[d.machine].hoops, d.hoop)) d.hoop = MACHINES[d.machine].defaultHoop;
+      var fm = {}; Object.keys(doc.formats).forEach(function (k) { fm[k] = d.formats && typeof d.formats[k] === 'boolean' ? d.formats[k] : doc.formats[k]; }); d.formats = fm;
       Object.keys(d).forEach(function (k) { doc[k] = d[k]; });
       if (!layerById(doc.sel)) doc.sel = doc.layers[doc.layers.length - 1].id;
       return true;

@@ -6,19 +6,13 @@
   var FONT = {}; A.fonts.forEach(function (f) { FONT[f.name] = f; });
   var EMOJI = {}; A.emoji.forEach(function (e) { EMOJI[e.code] = e; });
   var THEME = {}; A.themes.forEach(function (t) { THEME[t.name] = t; });
-  // Supported machines (picked from the top bar, like a printer in Cura). Each brings its hoops (sewing fields in mm,
-  // width x height as the hoop sits on the machine), the file set it reads and how it handles colours and jumps.
-  var MACHINES = {
-    deco330: { id: 'deco330', name: 'Bernina Deco 330', format: 'EXP+', files: 'EXP + INF + BMP', folder: 'EmbF5', media: 'memory card', trims: false, spm: 600, defaultHoop: 'A',
-      blurb: 'Single needle · no trimmer · EXP+ on a memory card',
-      hoops: { A: { name: 'Hoop A', label: 'Hoop A', field: [126, 110], open: 14, r: 12 }, B: { name: 'Hoop B', label: 'Hoop B', field: [140, 200], open: 14, r: 14 }, C: { name: 'Free-arm hoop C', label: 'C · free-arm', field: [50, 50], open: 10, r: 8 } } },
-    eoc06: { id: 'eoc06', name: 'Poolin EOC06', format: 'DST', files: 'DST', folder: '', media: 'USB stick', trims: true, spm: 800, defaultHoop: 'L',
-      blurb: 'Single needle · trims after each colour · DST on a USB stick or Wi-Fi',
-      hoops: { S: { name: '14 × 14 cm hoop', label: '14 × 14', field: [140, 140], open: 16, r: 12 }, M: { name: '20 × 20 cm hoop', label: '20 × 20', field: [200, 200], open: 16, r: 14 }, L: { name: '20 × 28 cm hoop', label: '20 × 28', field: [200, 280], open: 16, r: 16 } } }
-  };
+  // Supported machines (picked from the top bar, like a printer in Cura): the catalogue lives in machines.js. Each
+  // brings its hoops (sewing fields in mm, width x height as the hoop sits on the machine), its file format and how it
+  // handles colours and jumps.
+  var MACHINES = StitchMachines.MACHINES;
   var HOOPS = MACHINES.deco330.hoops; // the current machine's hoops (switched with the machine)
   function machine() { return MACHINES[doc.machine] || MACHINES.deco330; }
-  var PLATE = [330, 380];
+  var PLATE = [330, 380]; // the work surface in the 3D view; grows to fit the machine's largest hoop
 
   function b64ToBuf(b64) {
     var bin = atob(b64), u = new Uint8Array(bin.length);
@@ -128,7 +122,7 @@
     machine: 'deco330', hoop: 'A', theme: 'Home', fabric: THEME.Home.fabric, layers: [], sel: null,
     stitch: { v: 2, fillMode: 'patch', satin: false, spacing: null, strokeSpacing: null, tatamiSpacing: null, tatamiStitch: null, pullComp: null, minStitch: null, satinMax: null, split: null, underlay: 'auto', tatamiAngle: null },
     threads: { line: 'janome', weight: 40, needle: '75/11', point: 'sharp', fabric: 'woven', snap: true },
-    cardName: '', formats: { jef: true, dst: true, sheet: true }
+    cardName: '', formats: { exp: false, pes: false, jef: true, dst: true, sheet: true }
   };
   var ui = {
     stage: 'design', tool: 'move', view: '3d', ortho: false, allHoops: false, fidelity: 2, light: 'raking',

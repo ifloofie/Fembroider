@@ -405,6 +405,11 @@ var StitchExport = (function () {
       recs.push(rb.a);
     });
     var body = recs.reduce(function (a, r) { return a + r.length; }, 0);
+    if (opts.v1) { // plain version 1 (BERNINA 5 / 7 / 8 / 9 Series, bernette): 0-based record numbers, no Janome block
+      b.u32be(1); b.u32be(8); b.u32be(4 + body); b.u32be(seq.threads.length);
+      recs.forEach(function (r, i) { r[2] = (i >> 8) & 255; r[3] = i & 255; r.forEach(function (v) { b.u8(v); }); });
+      return b.out();
+    }
     b.u32be(2); b.u32be(12); b.u32be(20 + body); b.u32be(8 + body); b.u32be(seq.threads.length);
     recs.forEach(function (r) { r.forEach(function (v) { b.u8(v); }); });
     var head = hexBytes(INF_B2_HEAD);
@@ -430,7 +435,10 @@ var StitchExport = (function () {
     var d = new Date(), pad = function (n) { return (n < 10 ? '0' : '') + n; };
     var date = d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
     b.u32le(0x74 + nColors * 8); b.u32le(0x14); b.str(date); b.u8(0); b.u8(0);
-    b.u32le(nColors); b.u32le(points); b.u32le(JEF_HOOP[opts.hoop] !== undefined ? JEF_HOOP[opts.hoop] : 3);
+    // hoop code: the Deco's letter, or (for Janome / Elna machines) the smallest classic Janome hoop the design fits
+    var bw = seq.bounds.w * 10, bh = seq.bounds.h * 10;
+    var auto = bw < 500 && bh < 500 ? 1 : bw < 1260 && bh < 1100 ? 3 : bw < 1400 && bh < 2000 ? 2 : bw < 2000 && bh < 2000 ? 4 : 0;
+    b.u32le(nColors); b.u32le(points); b.u32le(opts.auto ? auto : JEF_HOOP[opts.hoop] !== undefined ? JEF_HOOP[opts.hoop] : 3);
     var bd = seq.bounds, L = Math.round(-bd.minX * 10), T = Math.round(bd.maxY * 10), R = Math.round(bd.maxX * 10), Bm = Math.round(-bd.minY * 10);
     b.u32le(L); b.u32le(T); b.u32le(R); b.u32le(Bm);
     [[550, 550], [250, 250], [700, 1000], [700, 1000]].forEach(function (h) {
@@ -487,6 +495,242 @@ var StitchExport = (function () {
     while (b.a.length < 512) b.u8(0x20);
     u.forEach(function (c) { dstRecord(c[0], c[1], c[2]).forEach(function (v) { b.u8(v); }); });
     dstRecord(0, 0, 'E').forEach(function (v) { b.u8(v); });
+    return b.out();
+  }
+
+  // ---------- PES / VP3 / XXX (layouts follow pyembroidery's writers, which these files are checked against) ----------
+  // absolute positions in 0.1 mm with y pointing DOWN (the convention of these formats), moves split to maxD
+  function points(seq, maxD) {
+    var out = [], x = 0, y = 0;
+    units(seq, maxD).forEach(function (u) {
+      if (u[2] === 'C') { out.push([x, y, 'C']); return; }
+      x += u[0]; y -= u[1]; out.push([x, y, u[2]]);
+    });
+    out.push([x, y, 'E']);
+    return out;
+  }
+  function extents(pts) {
+    var e = [Infinity, Infinity, -Infinity, -Infinity];
+    pts.forEach(function (p) { if (p[0] < e[0]) e[0] = p[0]; if (p[1] < e[1]) e[1] = p[1]; if (p[0] > e[2]) e[2] = p[0]; if (p[1] > e[3]) e[3] = p[1]; });
+    if (e[0] === Infinity) e = [0, 0, 0, 0];
+    return e;
+  }
+  function rgbOf(hex) { var n = parseInt(String(hex).slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  function f32le(b, v) { var a = new Uint8Array(new Float32Array([v]).buffer); for (var i = 0; i < 4; i++) b.u8(a[i]); }
+  function i16le(b, v) { b.u16le(v & 0xFFFF); }
+  function patch32le(b, at, v) { b.a[at] = v & 255; b.a[at + 1] = (v >> 8) & 255; b.a[at + 2] = (v >> 16) & 255; b.a[at + 3] = (v >>> 24) & 255; }
+  function patch32be(b, at, v) { b.a[at] = (v >>> 24) & 255; b.a[at + 1] = (v >> 16) & 255; b.a[at + 2] = (v >> 8) & 255; b.a[at + 3] = v & 255; }
+
+  // Brother's 64-colour PEC palette (index 0 unused)
+  var PEC_RGB = [null, [14, 31, 124], [10, 85, 163], [0, 135, 119], [75, 107, 175], [237, 23, 31], [209, 92, 0], [145, 54, 151], [228, 154, 203], [145, 95, 172], [158, 214, 125],
+    [232, 169, 0], [254, 186, 53], [255, 255, 0], [112, 188, 31], [186, 152, 0], [168, 168, 168], [125, 111, 0], [255, 255, 179], [79, 85, 86], [0, 0, 0], [11, 61, 145], [119, 1, 118],
+    [41, 49, 51], [42, 19, 1], [246, 74, 138], [178, 118, 36], [252, 187, 197], [254, 55, 15], [240, 240, 240], [106, 28, 138], [168, 221, 196], [37, 132, 187], [254, 179, 67],
+    [255, 243, 107], [208, 166, 96], [209, 84, 0], [102, 186, 73], [19, 74, 70], [135, 135, 135], [216, 204, 198], [67, 86, 7], [253, 217, 222], [249, 147, 188], [0, 56, 34],
+    [178, 175, 212], [104, 106, 176], [239, 227, 185], [247, 56, 102], [181, 75, 100], [19, 43, 26], [199, 1, 86], [254, 158, 50], [168, 222, 235], [0, 103, 62], [78, 41, 144],
+    [47, 126, 32], [255, 204, 204], [255, 217, 17], [9, 91, 166], [240, 249, 112], [227, 243, 91], [255, 153, 0], [255, 240, 141], [255, 200, 200]];
+  function redMean(a, b) {
+    var rm = Math.round((a[0] + b[0]) / 2), r = a[0] - b[0], g = a[1] - b[1], bl = a[2] - b[2];
+    return (((512 + rm) * r * r) >> 8) + 4 * g * g + (((767 - rm) * bl * bl) >> 8);
+  }
+  function nearestIn(rgb, list) {
+    var best = null, bd = Infinity;
+    list.forEach(function (c, i) { if (!c) return; var d = redMean(rgb, c); if (d <= bd) { bd = d; best = i; } });
+    return best;
+  }
+  // each distinct thread colour takes its own nearest palette entry, so two close colours stay distinct on screen
+  function pecPalette(seq) {
+    var pal = PEC_RGB.slice(), chart = PEC_RGB.map(function () { return null; }), uniq = [];
+    seq.threads.forEach(function (t) { if (uniq.indexOf(t.color) < 0) uniq.push(t.color); });
+    // closest pairs choose first, so a near-exact match is never taken by a colour that only loosely resembles it
+    var pairs = [];
+    uniq.forEach(function (hex, u) { pal.forEach(function (c, i) { if (c) pairs.push([redMean(rgbOf(hex), c), u, i]); }); });
+    pairs.sort(function (a, b) { return a[0] - b[0]; });
+    var done = {};
+    pairs.forEach(function (p) { if (done[p[1]] || !pal[p[2]]) return; done[p[1]] = true; pal[p[2]] = null; chart[p[2]] = rgbOf(uniq[p[1]]); });
+    return seq.threads.map(function (t) { return nearestIn(rgbOf(t.color), chart) || 20; });
+  }
+  var PEC_BLANK = '000000000000f0ffffffff0f080000000010040000000020' + '020000000040'.repeat(32) + '040000000020080000000010f0ffffffff0f000000000000';
+  function pecIcon(pts, ext, buffer) {
+    var g = hexBytes(PEC_BLANK), dw = (ext[2] - ext[0]) || 1, dh = (ext[3] - ext[1]) || 1;
+    var sc = Math.min((48 - buffer) / dw, (38 - buffer) / dh), tx = -(ext[0] + ext[2]) / 2 * sc + 24, ty = -(ext[1] + ext[3]) / 2 * sc + 19;
+    pts.forEach(function (p) {
+      var x = Math.floor(p[0] * sc + tx), y = Math.floor(p[1] * sc + ty), i = y * 6 + (x >> 3);
+      if (x >= 0 && y >= 0 && i < g.length) g[i] |= 1 << (x % 8);
+    });
+    return g;
+  }
+  function pecValue(b, v, long, flag) {
+    if (!long && v > -64 && v < 63) { b.u8(v & 0x7F); return; }
+    v = (v & 0x0FFF) | 0x8000 | ((flag || 0) << 8);
+    b.u8(v >> 8); b.u8(v);
+  }
+  function writePEC(b, seq, pts, name) {
+    var ext = extents(pts), pal = pecPalette(seq);
+    b.str('LA:' + (String(name || 'Untitled').slice(0, 8) + '                ').slice(0, 16) + '\r');
+    for (var i = 0; i < 12; i++) b.u8(0x20);
+    b.u8(0xFF); b.u8(0x00); b.u8(6); b.u8(38);
+    for (i = 0; i < 12; i++) b.u8(0x20);
+    b.u8(pal.length - 1); pal.forEach(function (p) { b.u8(p); });
+    for (i = pal.length; i < 463; i++) b.u8(0x20);
+    var start = b.a.length;
+    b.u8(0); b.u8(0); b.u8(0); b.u8(0); b.u8(0); b.u8(0x31); b.u8(0xFF); b.u8(0xF0);
+    b.u16le(Math.round(ext[2] - ext[0])); b.u16le(Math.round(ext[3] - ext[1])); b.u16le(0x1E0); b.u16le(0x1B0);
+    var jumping = true, init = true, two = true, x = 0, y = 0;
+    pts.forEach(function (p) {
+      var dx = p[0] - x, dy = p[1] - y; x = p[0]; y = p[1];
+      if (p[2] === 'S') {
+        if (jumping) { if (dx !== 0 && dy !== 0) { pecValue(b, 0); pecValue(b, 0); } jumping = false; }
+        pecValue(b, dx); pecValue(b, dy);
+      } else if (p[2] === 'J') {
+        jumping = true;
+        var fl = init ? 0x10 : 0x20; // first move is a plain jump; later ones are trim-jumps
+        pecValue(b, dx, true, fl); pecValue(b, dy, true, fl);
+      } else if (p[2] === 'C') {
+        if (jumping) { pecValue(b, 0); pecValue(b, 0); jumping = false; }
+        b.u8(0xFE); b.u8(0xB0); b.u8(two ? 2 : 1); two = !two;
+      } else if (p[2] === 'E') { b.u8(0xFF); }
+      init = false;
+    });
+    var len = b.a.length - start;
+    b.a[start + 2] = len & 255; b.a[start + 3] = (len >> 8) & 255; b.a[start + 4] = (len >> 16) & 255;
+    // thumbnails: the whole design, then one per colour
+    pecIcon(pts.filter(function (p) { return p[2] === 'S'; }), ext, 4).forEach(function (v) { b.u8(v); });
+    var block = [];
+    pts.forEach(function (p) {
+      if (p[2] === 'C' || p[2] === 'E') { pecIcon(block, ext, 5).forEach(function (v) { b.u8(v); }); block = []; return; }
+      if (p[2] === 'S') block.push(p);
+    });
+  }
+  // PES version 1 with one CEmbOne/CSewSeg block (the design as PE-Design sees it), then the PEC block the machine sews
+  function writePES(seq, name) {
+    var pts = points(seq, 2047), ext = extents(pts), b = new Bytes();
+    var pal = seq.threads.map(function (t) { return nearestIn(rgbOf(t.color), PEC_RGB) || 20; });
+    b.str('#PES0001');
+    var pecAt = b.a.length; b.u32le(0);
+    var any = pts.some(function (p) { return p[2] === 'S'; });
+    b.u16le(1); b.u16le(1); b.u16le(any ? 1 : 0);
+    if (!any) { b.u16le(0); b.u16le(0); }
+    else {
+      b.u16le(0xFFFF); b.u16le(0);
+      b.u16le(7); b.str('CEmbOne');
+      for (var i = 0; i < 8; i++) b.u16le(0);
+      var w = ext[2] - ext[0], h = ext[3] - ext[1];
+      [1, 0, 0, 1, 350 + 650 - w / 2, 100 + h + 900 - h / 2].forEach(function (v) { f32le(b, v); });
+      b.u16le(1); b.u16le(0); b.u16le(0); b.u16le(Math.trunc(w)); b.u16le(Math.trunc(h));
+      for (i = 0; i < 8; i++) b.u8(0);
+      var secAt = b.a.length; b.u16le(0);
+      b.u16le(0xFFFF); b.u16le(0);
+      b.u16le(7); b.str('CSewSeg');
+      // command blocks: runs of stitches, jumps (start and end point) and colour changes
+      var segs = [], ci = 0, sx = 0, sy = 0, k = 0;
+      while (k < pts.length) {
+        var t = pts[k][2], j = k; while (j < pts.length && pts[j][2] === t) j++;
+        if (t === 'S') { segs.push({ flag: 0, col: pal[ci], pts: pts.slice(k, j).map(function (p) { return [p[0], p[1]]; }) }); sx = pts[j - 1][0]; sy = pts[j - 1][1]; }
+        else if (t === 'J') segs.push({ flag: 1, col: pal[ci], pts: [[sx, sy], [pts[j - 1][0], pts[j - 1][1]]] });
+        else if (t === 'C') ci = Math.min(ci + (j - k), pal.length - 1);
+        k = j;
+      }
+      var log = [], prev = -1;
+      segs.forEach(function (s, n) {
+        if (n) b.u16le(0x8003);
+        if (s.col !== prev) { log.push([n, s.col]); prev = s.col; }
+        b.u16le(s.flag); b.u16le(s.col); b.u16le(s.pts.length);
+        s.pts.forEach(function (p) { i16le(b, Math.trunc(p[0] - ext[0])); i16le(b, Math.trunc(p[1] - ext[3])); });
+      });
+      b.u16le(log.length); log.forEach(function (l) { b.u16le(l[0]); b.u16le(l[1]); });
+      b.a[secAt] = segs.length & 255; b.a[secAt + 1] = (segs.length >> 8) & 255;
+      b.u16le(0); b.u16le(0);
+    }
+    patch32le(b, pecAt, b.a.length);
+    writePEC(b, seq, pts, name);
+    return b.out();
+  }
+
+  // VSM VP3 (PFAFF / Husqvarna Viking): one design, one block per colour, big-endian, UTF-16 strings
+  function vp3Str16(b, s) { b.u16be(s.length * 2); for (var i = 0; i < s.length; i++) b.u16be(s.charCodeAt(i)); }
+  function vp3Str8(b, s) { s = String(s).replace(/[^\x20-\x7e]/g, '?'); b.u16be(s.length); b.str(s); }
+  function i32be(b, v) { b.u32be(Math.trunc(v) | 0); }
+  function writeVP3(seq) {
+    var pts = points(seq, 255), b = new Bytes(), ext = extents(pts);
+    var made = 'Produced by     Software Ltd';
+    b.str('%vsm%'); b.u8(0); vp3Str16(b, made);
+    b.u8(0); b.u8(2); b.u8(0); var fileAt = b.a.length; b.u32be(0);
+    vp3Str16(b, '');
+    // colour blocks start at each colour change
+    var blocks = [], cur = [], ti = 0;
+    pts.forEach(function (p) { if (p[2] === 'C') { blocks.push({ pts: cur, t: seq.threads[ti++] }); cur = [p]; } else cur.push(p); });
+    blocks.push({ pts: cur, t: seq.threads[ti] || seq.threads[seq.threads.length - 1] });
+    i32be(b, ext[2] * 100); i32be(b, ext[1] * -100); i32be(b, ext[0] * 100); i32be(b, ext[3] * -100);
+    b.u32be(pts.length - 1); b.u8(0); b.u8(blocks.length); b.u8(12); b.u8(0); b.u8(1);
+    // design block
+    b.u8(0); b.u8(3); b.u8(0); var desAt = b.a.length; b.u32be(0);
+    var w = ext[2] - ext[0], h = ext[3] - ext[1], hw = w / 2, hh = h / 2, cx = ext[2] - hw, cy = ext[3] - hh;
+    i32be(b, Math.trunc(cx) * 100); i32be(b, Math.trunc(cy) * -100); b.u8(0); b.u8(0); b.u8(0);
+    i32be(b, Math.trunc(hw) * -100); i32be(b, Math.trunc(hw) * 100); i32be(b, Math.trunc(hh) * -100); i32be(b, Math.trunc(hh) * 100);
+    i32be(b, Math.trunc(w) * 100); i32be(b, Math.trunc(h) * 100);
+    vp3Str16(b, ''); b.u8(0x64); b.u8(0x64); b.u32be(4096); b.u32be(0); b.u32be(0); b.u32be(4096);
+    b.str('xxPP'); b.u8(1); b.u8(0); vp3Str16(b, made);
+    b.u16be(blocks.length);
+    blocks.forEach(function (blk, n) {
+      var s = blk.pts, t = blk.t || { color: '#000000' };
+      b.u8(0); b.u8(5); b.u8(0); var blkAt = b.a.length; b.u32be(0);
+      var f = s.length ? [s[0][0], s[0][1]] : [0, 0], l = s.length ? [s[s.length - 1][0], s[s.length - 1][1]] : [0, 0];
+      if (n === 0) f = [0, 0];
+      i32be(b, Math.trunc(f[0] - cx) * 100); i32be(b, Math.trunc(-(f[1] - cy)) * 100);
+      var rgb = rgbOf(t.color);
+      b.u8(1); b.u8(0); b.u8(rgb[0]); b.u8(rgb[1]); b.u8(rgb[2]); b.u8(0); b.u8(0); b.u8(0); b.u8(5); b.u8(0x28);
+      vp3Str8(b, t.thread ? String(t.thread.code) : ''); vp3Str8(b, t.thread ? t.thread.name : t.color); vp3Str8(b, t.thread ? (t.thread.brand || '') : '');
+      i32be(b, Math.trunc(l[0] - f[0]) * 100); i32be(b, Math.trunc(-(l[1] - f[1])) * 100);
+      b.u8(0); b.u8(1); b.u8(0); var stAt = b.a.length; b.u32be(0);
+      b.u8(0x0A); b.u8(0xF6); b.u8(0);
+      var lx = f[0], ly = f[1];
+      for (var i = 0; i < s.length; i++) {
+        var p = s[i];
+        if (p[2] === 'E') { b.u8(0x80); b.u8(0x03); break; }
+        if (p[2] !== 'S') continue; // VP3 has no jump command: the next stitch is a long move
+        var dx = p[0] - lx, dy = p[1] - ly; lx += dx; ly += dy;
+        if (dx >= -127 && dx <= 127 && dy >= -127 && dy <= 127) { b.u8(dx); b.u8(dy); }
+        else { b.u8(0x80); b.u8(0x01); b.u16be(dx & 0xFFFF); b.u16be(dy & 0xFFFF); b.u8(0x80); b.u8(0x02); }
+      }
+      patch32be(b, stAt, b.a.length - stAt - 4);
+      b.u8(0);
+      patch32be(b, blkAt, b.a.length - blkAt - 4);
+    });
+    patch32be(b, desAt, b.a.length - desAt - 4);
+    patch32be(b, fileAt, b.a.length - fileAt - 4);
+    return b.out();
+  }
+
+  // Singer XXX: little-endian header, byte-pair stitches (y up), 0x7F escapes jumps and colour changes
+  function writeXXX(seq) {
+    var pts = points(seq, 124), b = new Bytes(), ext = extents(pts), last = pts[pts.length - 1], i;
+    for (i = 0; i < 0x17; i++) b.u8(0);
+    b.u32le(pts.length - 1);
+    for (i = 0; i < 0x0C; i++) b.u8(0);
+    b.u32le(seq.threads.length); b.u16le(0);
+    i16le(b, Math.trunc(ext[2] - ext[0])); i16le(b, Math.trunc(ext[3] - ext[1]));
+    i16le(b, last[0]); i16le(b, -last[1]); i16le(b, -ext[0]); i16le(b, ext[3]);
+    for (i = 0; i < 0x42; i++) b.u8(0);
+    b.u16le(0); b.u16le(0);
+    for (i = 0; i < 0x73; i++) b.u8(0);
+    b.u16le(0x20);
+    for (i = 0; i < 8; i++) b.u8(0);
+    var endAt = b.a.length; b.u32le(0);
+    var x = 0, y = 0;
+    for (i = 0; i < pts.length; i++) {
+      var p = pts[i], dx = p[0] - x, dy = p[1] - y; x = p[0]; y = p[1];
+      if (p[2] === 'E') break;
+      if (p[2] === 'C') { b.u8(0x7F); b.u8(0x08); b.u8(dx); b.u8(-dy); continue; }
+      if (p[2] === 'J') { b.u8(0x7F); b.u8(0x01); b.u8(dx); b.u8(-dy); continue; }
+      if (dx > -124 && dx < 124 && dy > -124 && dy < 124) { b.u8(dx); b.u8(-dy); }
+      else { b.u8(0x7D); i16le(b, dx); i16le(b, -dy); }
+    }
+    patch32le(b, endAt, b.a.length);
+    b.u8(0x7F); b.u8(0x7F); b.u8(0x02); b.u8(0x14);
+    b.u8(0); b.u8(0);
+    seq.threads.forEach(function (t) { var c = rgbOf(t.color); b.u8(0); b.u8(c[0]); b.u8(c[1]); b.u8(c[2]); });
+    for (i = seq.threads.length; i < 21; i++) b.u32le(0);
+    b.u32le(0xFFFFFF00); b.u8(0); b.u8(1);
     return b.out();
   }
 
@@ -564,7 +808,8 @@ var StitchExport = (function () {
     L.push('Stitches      ' + seq.stats.stitches.toLocaleString('en-US'));
     L.push('Colours       ' + seq.threads.length + ' (' + seq.stats.colorChanges + ' colour change' + (seq.stats.colorChanges === 1 ? '' : 's') + ')');
     L.push('Jumps         ' + seq.stats.jumps + (info.trims ? ' (the machine trims at colour changes; snip any loose connecting threads)' : ' (snip the connecting threads; the machine has no trimmer)'));
-    L.push('Est. time     about ' + Math.ceil(seq.stats.minutes) + ' minutes at 600 stitches/min');
+    var spm = info.spm || 600;
+    L.push('Est. time     about ' + Math.ceil(seq.stats.minutes) + ' minutes at ' + spm + ' stitches/min');
     if (info.materials && info.materials.length) { L.push(''); L.push('MATERIALS'); info.materials.forEach(function (m) { L.push('  ' + m); }); }
     L.push('');
     L.push('COLOUR SEQUENCE');
@@ -576,7 +821,11 @@ var StitchExport = (function () {
     L.push('FILES');
     (info.files || []).forEach(function (f) { L.push('  ' + f); });
     L.push('');
-    if (info.machineId === 'eoc06') {
+    if (info.load && info.load.length) {
+      L.push('LOADING (' + info.machine + ')');
+      L.push('  ' + info.load.join(' ').replace(/^To sew: /, ''));
+      L.push(info.trims ? '  The machine trims the thread at colour changes; snip any loose connecting threads.' : '  The machine has no trimmer: snip the connecting threads after sewing.');
+    } else if (info.machineId === 'eoc06') {
       L.push('LOADING (' + info.machine + ')');
       L.push('  Copy the DST file to a FAT32 USB stick (or send it over Wi-Fi) and open it on the machine.');
       L.push('  Fit the ' + info.hoopName + '. The machine stops at each colour change and trims the thread itself.');
@@ -592,6 +841,7 @@ var StitchExport = (function () {
   return {
     buildSequence: buildSequence, makeXform: makeXform,
     writeEXP: writeEXP, writeINF: writeINF, writeJEF: writeJEF, writeDST: writeDST, writeBMP: writeBMP,
+    writePES: writePES, writeVP3: writeVP3, writeXXX: writeXXX,
     drawPreview: drawPreview, zip: zip, crc32: crc32, cardName: cardName, worksheet: worksheet
   };
 })();
