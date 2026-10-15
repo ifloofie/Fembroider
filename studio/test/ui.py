@@ -1,4 +1,4 @@
-"""Headless UI flows for Stitch Studio. Usage: python3 test/ui.py [flow ...]  (default: all)"""
+"""Headless UI flows for Fembroider. Usage: python3 test/ui.py [flow ...]  (default: all)"""
 import asyncio, sys, os, json, http.server, threading, functools
 from playwright.async_api import async_playwright
 
@@ -35,6 +35,11 @@ async def main(flows):
         info = await pg.evaluate("({layers: __studio.doc.layers.length, st: __studio.seq() && __studio.seq().stats, fit: __studio.fit().text, worker: document.querySelector('#panelBody') !== null})")
         print('boot', json.dumps(info))
         await pg.screenshot(path=os.path.join(OUT, '01_design_light.png'))
+        # the older flows expect every section open: switch "one section at a time" off for them
+        if await pg.get_attribute('#accordionBtn', 'aria-pressed') == 'true':
+            await pg.click('#accordionBtn'); await pg.wait_for_timeout(200)
+            await pg.evaluate("Object.keys(__studio.ui.open).forEach(function (k) { if (!/^sub:/.test(k) && k !== 'experimental' && k !== 'perf') __studio.ui.open[k] = true; })")
+            await pg.click('#tab-design'); await pg.wait_for_timeout(200)
 
         if 'all' in flows or 'theme' in flows:
             await pg.click('.themeseg [data-theme=dark]')

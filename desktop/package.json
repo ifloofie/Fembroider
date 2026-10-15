@@ -1,9 +1,9 @@
 {
-  "name": "stitch-preview",
-  "productName": "Stitch Studio",
-  "version": "0.14.0",
-  "description": "Embroidery digitizer and 3D stitch preview for the Bernina Deco 330",
-  "author": "Stitch Studio contributors",
+  "name": "fembroider",
+  "productName": "Fembroider",
+  "version": "0.15.0",
+  "description": "Fembroider: embroidery digitizer and 3D stitch preview",
+  "author": "Fembroider contributors",
   "license": "MIT",
   "main": "main.js",
   "private": true,
@@ -22,8 +22,8 @@
   },
   "build": {
     "appId": "com.stitchpreview.app",
-    "productName": "Stitch Studio",
-    "copyright": "Copyright (c) 2026 Stitch Studio contributors",
+    "productName": "Fembroider",
+    "copyright": "Copyright (c) 2026 Fembroider contributors",
     "electronVersion": "44.7.2",
     "directories": {
       "output": "dist",
@@ -59,10 +59,10 @@
         }
       ],
       "icon": "build/icon.ico",
-      "executableName": "StitchStudio",
+      "executableName": "Fembroider",
       "requestedExecutionLevel": "asInvoker",
       "signAndEditExecutable": true,
-      "artifactName": "StitchStudio-${version}-win-x64.${ext}"
+      "artifactName": "Fembroider-${version}-win-x64.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -71,10 +71,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Stitch Studio",
-      "uninstallDisplayName": "Stitch Studio",
+      "shortcutName": "Fembroider",
+      "uninstallDisplayName": "Fembroider",
       "deleteAppDataOnUninstall": false,
-      "artifactName": "StitchStudio-Setup-${version}-x64.${ext}",
+      "artifactName": "Fembroider-Setup-${version}-x64.${ext}",
       "packElevateHelper": false
     },
     "publish": null,

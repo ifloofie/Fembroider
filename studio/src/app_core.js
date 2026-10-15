@@ -50,6 +50,58 @@
   }
   if (darkMQ && darkMQ.addEventListener) darkMQ.addEventListener('change', function () { if (themePref === 'system') applyTheme(); });
 
+  // ---------- UI palettes: pride-inspired accents and header, each with a light and a dark variant ----------
+  // stripes: the flag (drawn under the header and in the picker); light / dark: accent, accent text, header gradient
+  var UIPALETTES = [
+    { id: 'classic', name: 'Classic', stripes: ['#196ef0', '#0e1c3f'], light: ['#196ef0', '#ffffff', '#0e1c3f', '#16306a'], dark: ['#4a8dff', '#ffffff', '#0b1430', '#132555'], plain: true },
+    { id: 'rainbow', name: 'Rainbow', stripes: ['#e40303', '#ff8c00', '#ffed00', '#008026', '#004dff', '#750787'], light: ['#7b2fd0', '#ffffff', '#3b1470', '#7a1a52'], dark: ['#b388ff', '#160b2a', '#24104a', '#4a1236'] },
+    { id: 'progress', name: 'Progress', stripes: ['#ffffff', '#ffafc8', '#74d7ee', '#613915', '#000000', '#e40303', '#ff8c00', '#ffed00', '#008026', '#004dff', '#750787'], light: ['#0b7fae', '#ffffff', '#1d2b3a', '#4a2a16'], dark: ['#74d7ee', '#08202a', '#14202a', '#33200f'] },
+    { id: 'trans', name: 'Transgender', stripes: ['#5bcefa', '#f5a9b8', '#ffffff', '#f5a9b8', '#5bcefa'], light: ['#c03a6b', '#ffffff', '#1d6f96', '#a3486e'], dark: ['#5bcefa', '#06202c', '#164a63', '#6b2d4a'] },
+    { id: 'bi', name: 'Bisexual', stripes: ['#d60270', '#d60270', '#9b4f96', '#0038a8', '#0038a8'], light: ['#a3157e', '#ffffff', '#8c0a52', '#0a2f8a'], dark: ['#e070b8', '#2a0620', '#5a0836', '#0a1f5c'] },
+    { id: 'lesbian', name: 'Lesbian', stripes: ['#d52d00', '#ef7627', '#ff9a56', '#ffffff', '#d162a4', '#b55690', '#a30262'], light: ['#b4234f', '#ffffff', '#a8320c', '#8a0a55'], dark: ['#ff9a7a', '#2e0c06', '#5a1a08', '#5a0a3a'] },
+    { id: 'gay', name: 'Gay', stripes: ['#078d70', '#26ceaa', '#98e8c1', '#ffffff', '#7bade2', '#5049cc', '#3d1a78'], light: ['#0b7c66', '#ffffff', '#08604f', '#3d2a8a'], dark: ['#3fd9b4', '#04241c', '#063d33', '#2a1a60'] },
+    { id: 'pan', name: 'Pansexual', stripes: ['#ff218c', '#ffd800', '#21b1ff'], light: ['#d1137a', '#ffffff', '#a80d5e', '#0a6aa0'], dark: ['#ff6fb5', '#2c061a', '#5a0a38', '#063c5e'] },
+    { id: 'nonbinary', name: 'Nonbinary', stripes: ['#fcf434', '#ffffff', '#9c59d1', '#2c2c2c'], light: ['#7d3cc0', '#ffffff', '#5a2a8c', '#2c2c2c'], dark: ['#c9a2f2', '#1c0f2a', '#3a1c5c', '#222222'] },
+    { id: 'ace', name: 'Asexual', stripes: ['#000000', '#a3a3a3', '#ffffff', '#800080'], light: ['#7a1f7a', '#ffffff', '#1c1c1c', '#5c0f5c'], dark: ['#d38ad3', '#200820', '#141414', '#3d0f3d'] },
+    { id: 'intersex', name: 'Intersex', stripes: ['#ffd800', '#ffd800', '#7902aa', '#ffd800', '#ffd800'], light: ['#7902aa', '#ffffff', '#5a0280', '#6a5000'], dark: ['#ffd800', '#2a2000', '#3a0a5a', '#3d3000'] }
+  ];
+  var paletteId = 'classic';
+  try { paletteId = localStorage.getItem('stitch.palette') || 'classic'; } catch (e) {}
+  function paletteOf(id) { return UIPALETTES.filter(function (p) { return p.id === id; })[0] || UIPALETTES[0]; }
+  function mixHex(a, b, t) {
+    var x = parseInt(a.slice(1), 16), y = parseInt(b.slice(1), 16), o = '#';
+    [16, 8, 0].forEach(function (sh) { var c = Math.round(((x >> sh) & 255) * (1 - t) + ((y >> sh) & 255) * t); o += ('0' + c.toString(16)).slice(-2); });
+    return o;
+  }
+  function flagGradient(st, dir) {
+    var n = st.length;
+    return 'linear-gradient(' + (dir || '90deg') + ', ' + st.map(function (c, i) { return c + ' ' + (i / n * 100).toFixed(2) + '% ' + ((i + 1) / n * 100).toFixed(2) + '%'; }).join(', ') + ')';
+  }
+  function paletteCss(p) {
+    if (p.plain) return '';
+    function vars(v, dark) {
+      var base = dark ? { bg: '#15181e', panel: '#23272f', panel2: '#1c2027', line: '#353b46' } : { bg: '#e9edf2', panel: '#ffffff', panel2: '#f4f6f9', line: '#d7dde6' };
+      var tint = dark ? 0.07 : 0.05;
+      return '--primary:' + v[0] + ';--primary-ink:' + v[1] + ';--primary-soft:' + mixHex(base.panel, v[0], dark ? 0.22 : 0.12) + ';--header:' + v[2] + ';--header-2:' + v[3] +
+        ';--bg:' + mixHex(base.bg, v[0], tint) + ';--panel-2:' + mixHex(base.panel2, v[0], tint * 0.8) + ';--line:' + mixHex(base.line, v[0], tint) +
+        ';--scene-top:' + mixHex(dark ? '#2a2f38' : '#f1f4f8', v[0], tint) + ';--scene-bottom:' + mixHex(dark ? '#15181d' : '#d3dae4', v[0], tint) + ';';
+    }
+    var L = vars(p.light, false), D = vars(p.dark, true);
+    // html:root outranks the page's own :root rules wherever this style element ends up
+    return 'html:root{' + L + '--flag:' + flagGradient(p.stripes) + ';}' +
+      '@media (prefers-color-scheme: dark){html:root:not([data-theme="light"]){' + D + '}}' +
+      'html:root[data-theme="dark"]{' + D + '}';
+  }
+  function applyPalette() {
+    var p = paletteOf(paletteId), el = document.getElementById('paletteStyle');
+    if (!el) { el = document.createElement('style'); el.id = 'paletteStyle'; document.head.appendChild(el); }
+    el.textContent = paletteCss(p);
+    document.documentElement.setAttribute('data-palette', p.id);
+    var sw = document.getElementById('paletteSwatch'); if (sw) sw.style.background = flagGradient(p.stripes, '135deg');
+    if (typeof onSceneTheme === 'function') onSceneTheme();
+  }
+  function setPalette(id) { paletteId = paletteOf(id).id; try { localStorage.setItem('stitch.palette', paletteId); } catch (e) {} applyPalette(); }
+
   // ---------- stitch generation: background worker with main-thread fallback ----------
   var Gen = (function () {
     var worker = null, seq = 0, pending = new Map(), fontsSent = null;
@@ -124,8 +176,9 @@
     threads: { line: 'janome', weight: 40, needle: '75/11', point: 'sharp', fabric: 'woven', snap: true },
     cardName: '', formats: { exp: false, pes: false, jef: true, dst: true, sheet: true }
   };
+  function storedInt(k, def, lo, hi) { try { var v = parseInt(localStorage.getItem(k), 10); return v >= lo && v <= hi ? v : def; } catch (e) { return def; } }
   var ui = {
-    stage: 'design', tool: 'move', view: '3d', ortho: false, allHoops: false, fidelity: 2, light: 'raking',
+    stage: 'design', tool: 'move', view: '3d', ortho: false, allHoops: false, fidelity: storedInt('stitch.quality', 2, 0, 3), light: 'raking', accordion: storedInt('stitch.accordion', 1, 0, 1) === 1,
     twist: 18, sharp: 55, spec: 45, copies: 1, bench: false, sew: 1, playing: false, speed: 1, snap: true,
     applyThemeAll: true, open: { experimental: false, perf: false }
   };

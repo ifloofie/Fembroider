@@ -1,4 +1,4 @@
-// Stitch Studio machine catalogue: every embroidery machine the app can export for, with its hoops (sewing fields in
+// Fembroider machine catalogue: every embroidery machine the app can export for, with its hoops (sewing fields in
 // mm, width x height as the hoop sits on the machine), the file format it reads, and how it handles jumps.
 // Home single-needle hoops are listed portrait (long side front to back); multi-needle and commercial frames
 // landscape, as their makers list them. "ver" marks hoop sets checked against a maker or dealer spec; the rest are

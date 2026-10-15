@@ -42,7 +42,7 @@ jobs:
         run: Get-FileHash dist\*.exe, dist\*.zip -Algorithm SHA256 | Format-Table -AutoSize | Out-File dist\SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: stitch-studio-windows
+          name: fembroider-windows
           path: |
             desktop/dist/*.exe
             desktop/dist/*.zip

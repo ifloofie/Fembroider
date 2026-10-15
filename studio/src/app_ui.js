@@ -150,8 +150,21 @@
   }
 
   // ---------- small HTML builders ----------
+  // sections: with "one at a time" on, only the stage's active section is open (Layers keeps its own state)
+  var ACC_DEFAULT = { design: 'layer', stitch: 'threads', export: 'machine' };
+  if (!ui.acc) ui.acc = Object.assign({}, ACC_DEFAULT);
+  function secOpen(id) {
+    if (!ui.accordion || id === 'layers') return ui.open[id] !== false;
+    return ui.acc[ui.stage] === id;
+  }
+  // collapsible group inside a section, for options that are set once and then left alone
+  function sub(id, title, meta, body, defOpen) {
+    var k = 'sub:' + id, open = ui.open[k] === undefined ? !!defOpen : ui.open[k];
+    return '<details class="sub" data-sub="' + id + '"' + (open ? ' open' : '') + '><summary><span>' + esc(title) + '</span>' + (meta ? '<span class="meta">' + meta + '</span>' : '') +
+      ic('chev', 'chev') + '</summary><div class="sub-body">' + body + '</div></details>';
+  }
   function sec(id, icon, title, meta, body) {
-    var open = ui.open[id] !== false;
+    var open = secOpen(id);
     return '<details class="sec" data-sec="' + id + '"' + (open ? ' open' : '') + '><summary>' + ic(icon) + '<span>' + esc(title) + '</span>' +
       (meta ? '<span class="meta">' + meta + '</span>' : '') + ic('chev', 'chev') + '</summary><div class="sec-body">' + body + '</div></details>';
   }
@@ -309,12 +322,13 @@
       var wid = 'f' + (++fid);
       return sec('layer', 'text', 'Text', esc(f.name), locked +
         '<input class="field big" data-k="L.p.text" maxlength="40" value="' + esc(L.p.text) + '" aria-label="Text" style="font-family:\'' + f.family + '\';font-weight:' + f.weight + '"' + (L.locked ? ' disabled' : '') + '>' +
-        fonts +
-        '<p class="note">' + A.fonts.length + ' open-source fonts (SIL OFL 1.1 / Apache 2.0). Script fonts join up and suit a swoop; heavy Athletic and Block faces sew cleanest at small sizes.</p>' +
-        swoopHtml(L) +
-        rangeRow('Slant', 'L.p.tilt', 0, 14, 1, 0, '°') +
-        row('Width', '<div class="ctl"><div class="unit" style="width:120px"><input class="field num" style="width:100%" type="number" id="' + wid + '" data-k="L.p.width" data-empty="0" data-clamp min="20" max="190" step="1" placeholder="auto" value="' + (L.p.width || '') + '"><i>mm</i></div><span class="note">blank = natural</span></div>', wid) +
-        fillHtml(L) + threadHtml(L));
+        sub('font', 'Font', esc(f.name), fonts +
+          '<p class="note">' + A.fonts.length + ' open-source fonts (SIL OFL 1.1 / Apache 2.0). Script fonts join up and suit a swoop; heavy Athletic and Block faces sew cleanest at small sizes.</p>', true) +
+        sub('shape', 'Swoop, slant & width', esc((SWOOPS.filter(function (w) { return w[0] === (L.p.tail || 'none'); })[0] || SWOOPS[0])[1] + ' · ' + (L.p.tilt || 0) + '° · ' + (L.p.width ? L.p.width + ' mm' : 'natural width')),
+          swoopHtml(L) +
+          rangeRow('Slant', 'L.p.tilt', 0, 14, 1, 0, '°') +
+          row('Width', '<div class="ctl"><div class="unit" style="width:120px"><input class="field num" style="width:100%" type="number" id="' + wid + '" data-k="L.p.width" data-empty="0" data-clamp min="20" max="190" step="1" placeholder="auto" value="' + (L.p.width || '') + '"><i>mm</i></div><span class="note">blank = natural</span></div>', wid), false) +
+        sub('textfill', 'Fill & thread', esc(hasStripes(L) ? (L.fx.stripes.mode === 'gradient' ? 'gradient' : 'stripes') : 'solid'), fillHtml(L) + threadHtml(L), true));
     }
     if (L.type === 'emoji') {
       var e = EMOJI[L.p.code];
@@ -329,7 +343,7 @@
       '<div style="display:flex;gap:12px;align-items:center">' + (s.thumb ? '<img alt="" src="' + s.thumb + '" style="width:56px;height:56px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#fff">' : '') +
       '<div style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.name || L.name) + '</b><span class="note">' + kind + '</span></div></div>' +
       rangeRow('Size', 'L.p.size', 15, 190, 1, 0, ' mm') + threadHtml(L) +
-      '<div id="artBox">' + imageArtHtml(L, isSvg) + '</div>' +
+      sub('art', 'Artwork & stitching', esc({ auto: 'Auto', flat: 'Flat art', painting: 'Painting', line: 'Line art' }[L.p.art] || 'Auto'), '<div id="artBox">' + imageArtHtml(L, isSvg) + '</div>', true) +
       '<div class="lab" style="font-size:13.5px">Thread colours</div><div id="recolorBox">' + recolorHtml(L) + '</div>');
   }
   // how a picture becomes stitches: colour areas (flat art, paintings) or line art
@@ -531,11 +545,10 @@
       sec('look', 'sheen', 'Preview', '',
         row('Play speed', seg('ui.speed', [[1, '1×'], [4, '4×'], [16, '16×']], { label: 'Playback speed' })) +
         row('Lighting', seg('ui.light', [['top', 'Top'], ['raking', 'Raking'], ['soft', 'Soft']], { label: 'Lighting' })) +
-        row('Fidelity', seg('ui.fidelity', [[0, 'Low', 'flat'], [1, 'Med', 'round'], [2, 'High', 'twist'], [3, 'Ultra', 'plies']], { label: 'Fidelity' })) +
         rangeRow('Twist', 'ui.twist', 8, 30, 1, 0, ' /in') +
         rangeRow('Sheen sharpness', 'ui.sharp', 10, 120, 1, 0, '') +
         rangeRow('Sheen strength', 'ui.spec', 0, 100, 1, 0, '%') +
-        '<p class="note">Play at the bottom of the view shows the needle path layer by layer, in sewing order.</p>') +
+        '<p class="note">Play at the bottom of the view shows the needle path layer by layer, in sewing order. Graphics quality and the frame rate sit at the bottom of the view.</p>') +
       sec('perf', 'gauge', 'Diagnostics', '',
         row('Stress test', seg('ui.copies', [[1, '1×'], [4, '4×'], [9, '9×'], [16, '16×']], { label: 'Copies' })) +
         '<div style="display:flex;align-items:end;justify-content:space-between;gap:12px"><div class="fps" id="fpsBig">—<small>fps</small></div>' +
@@ -855,9 +868,65 @@
   }
   $('machineBtn').addEventListener('click', function (e) { e.stopPropagation(); if (pop && pop.classList.contains('machinepop')) closePop(); else openMachinePop(); });
 
+  // ---------- colour palette & light / dark (header) ----------
+  function placePop(p, btn, alignRight) {
+    var r = btn.getBoundingClientRect(), top = r.bottom + 6;
+    p.style.left = Math.max(12, Math.min(window.innerWidth - p.offsetWidth - 12, alignRight ? r.right - p.offsetWidth : r.left)) + 'px';
+    p.style.top = top + 'px'; p.style.maxHeight = (window.innerHeight - top - 12) + 'px';
+    pop = p; btn.setAttribute('aria-expanded', 'true');
+    p.addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Escape') { closePop(); btn.focus(); } });
+  }
+  function openPalettePop() {
+    closePop();
+    var btn = $('paletteBtn'), p = document.createElement('div');
+    p.className = 'palpop'; p.setAttribute('role', 'dialog'); p.setAttribute('aria-label', 'Colour palette');
+    function html() {
+      return '<h4>Mode</h4><div class="modes" role="group" aria-label="Light or dark">' + [['light', 'Light'], ['dark', 'Dark'], ['system', 'Match system']].map(function (m) {
+          return '<button type="button" data-mode="' + m[0] + '" aria-pressed="' + String(themePref === m[0]) + '">' + m[1] + '</button>'; }).join('') + '</div>' +
+        '<h4>Palette</h4><div class="palgrid" role="group" aria-label="Palette">' + UIPALETTES.map(function (u) {
+          return '<button type="button" data-pal="' + u.id + '" aria-pressed="' + String(u.id === paletteId) + '"><i style="background:' + flagGradient(u.stripes, '180deg') + '"></i>' + esc(u.name) + '</button>'; }).join('') + '</div>' +
+        '<p class="note" style="margin:2px 4px">Pride-inspired colours for the app itself, in light and dark. Your design\'s threads are set under Colourway.</p>';
+    }
+    p.innerHTML = html();
+    document.body.appendChild(p); placePop(p, btn, true);
+    p.addEventListener('click', function (e) {
+      var m = e.target.closest('[data-mode]'), q = e.target.closest('[data-pal]');
+      if (m) { themePref = m.dataset.mode; try { localStorage.setItem('stitch.theme', themePref); } catch (err) {} applyTheme(); }
+      else if (q) setPalette(q.dataset.pal);
+      else return;
+      var f = (m || q).dataset; p.innerHTML = html();
+      var again = p.querySelector(m ? '[data-mode="' + f.mode + '"]' : '[data-pal="' + f.pal + '"]'); if (again) again.focus();
+    });
+    var cur = p.querySelector('[data-pal][aria-pressed="true"]'); if (cur) cur.focus();
+  }
+  $('paletteBtn').addEventListener('click', function (e) { e.stopPropagation(); if (pop && pop.classList.contains('palpop')) closePop(); else openPalettePop(); });
+
+  // ---------- graphics quality and the live frame rate (bottom of the view) ----------
+  function syncQuality() { document.querySelectorAll('.qseg [data-q]').forEach(function (b) { b.setAttribute('aria-pressed', String(+b.dataset.q === ui.fidelity)); }); }
+  function setQuality(q) {
+    ui.fidelity = q; try { localStorage.setItem('stitch.quality', String(q)); } catch (e) {}
+    syncQuality(); resize(); applyLook();
+    toast('Graphics quality: ' + ['Low', 'Medium', 'High', 'Ultra'][q]);
+  }
+  document.querySelectorAll('.qseg [data-q]').forEach(function (b) { b.addEventListener('click', function () { setQuality(+b.dataset.q); }); });
+  syncQuality();
+  var lastFps = 0;
+  function updateFps() {
+    var el = $('fpsMini'); if (!el) return;
+    // frames drawn back to back recently (a gap over 600 ms means the view was still, not slow)
+    var now = performance.now(), sum = 0, n = 0;
+    for (var i = drawTimes.length - 1; i > 0 && now - drawTimes[i] < 1500; i--) { var d = drawTimes[i] - drawTimes[i - 1]; if (d < 600) { sum += d; n++; } }
+    var live = n >= 2 && now - drawTimes[drawTimes.length - 1] < 700;
+    if (live) lastFps = Math.round(1000 / (sum / n));
+    el.classList.toggle('idle', !live); el.classList.toggle('slow', live && lastFps < 30);
+    el.querySelector('b').textContent = lastFps ? String(lastFps) : '—';
+    el.title = (live ? lastFps + ' frames per second right now.' : 'Idle: the view only redraws when something moves' + (lastFps ? ' (last ' + lastFps + ' fps).' : '.')) + ' Graphics quality: ' + ['Low', 'Medium', 'High', 'Ultra'][ui.fidelity] + '.';
+  }
+  setInterval(updateFps, 250);
+
   // ---------- popovers: thread picker, emoji picker ----------
   var pop = null;
-  function closePop() { if (pop) { pop.remove(); pop = null; } var mb = document.getElementById('machineBtn'); if (mb) mb.setAttribute('aria-expanded', 'false'); var m = document.querySelector('.scrim'); if (m) m.remove(); }
+  function closePop() { if (pop) { pop.remove(); pop = null; } ['machineBtn', 'paletteBtn', 'projectBtn'].forEach(function (id) { var b = document.getElementById(id); if (b) b.setAttribute('aria-expanded', 'false'); }); var m = document.querySelector('.scrim'); if (m) m.remove(); }
   function openThreadPicker(anchor, cur, title, onPick) {
     closePop();
     var p = document.createElement('div');
@@ -944,6 +1013,15 @@
 
   // ---------- import ----------
   function defaultArtSize() { var H = HOOPS[doc.hoop]; return Math.round(Math.min(70, Math.min(H.field[0], H.field[1]) * 0.7)); }
+  // a picture as the engine sees it: decoded, and no more than 2400 px on its longer side
+  function pictureBitmap(blob) {
+    return createImageBitmap(blob).then(function (bm) {
+      var mx = Math.max(bm.width, bm.height);
+      if (mx <= 2400) return bm;
+      var k = 2400 / mx;
+      return createImageBitmap(bm, { resizeWidth: Math.round(bm.width * k), resizeHeight: Math.round(bm.height * k), resizeQuality: 'high' });
+    });
+  }
   function importFile(file) {
     if (!file) return;
     var isSvg = /svg/i.test(file.type) || /\.svg$/i.test(file.name), name = (file.name || 'Image').replace(/\.[^.]+$/, '') || 'Image';
@@ -961,13 +1039,8 @@
       }).catch(function () { SOURCES.delete(id); toast('That SVG could not be read.'); });
       return;
     }
-    createImageBitmap(file).then(function (bm) {
-      var mx = Math.max(bm.width, bm.height);
-      if (mx <= 2400) return bm;
-      var k = 2400 / mx;
-      return createImageBitmap(bm, { resizeWidth: Math.round(bm.width * k), resizeHeight: Math.round(bm.height * k), resizeQuality: 'high' });
-    }).then(function (bm) {
-      SOURCES.set(id, { kind: 'bitmap', bitmap: bm, name: file.name, thumb: URL.createObjectURL(file) });
+    pictureBitmap(file).then(function (bm) {
+      SOURCES.set(id, { kind: 'bitmap', bitmap: bm, name: file.name, thumb: URL.createObjectURL(file), blob: file, mime: file.type || 'image/png' });
       addLayer(makeImageLayer(id, name, defaultArtSize()));
       toast('Imported ' + file.name + ' — reducing to ' + 5 + ' thread colours');
     }).catch(function () { toast('That picture could not be read.'); });
@@ -1076,7 +1149,33 @@
       if (e.key === 'Enter' && e.target.matches('input.field')) { e.target.blur(); }
     });
   });
-  $('panelBody').addEventListener('toggle', function (e) { var d = e.target; if (d.dataset && d.dataset.sec) ui.open[d.dataset.sec] = d.open; }, true);
+  $('panelBody').addEventListener('toggle', function (e) {
+    var d = e.target; if (!d.dataset) return;
+    if (d.dataset.sub) { ui.open['sub:' + d.dataset.sub] = d.open; return; }
+    var id = d.dataset.sec; if (!id) return;
+    ui.open[id] = d.open;
+    if (!ui.accordion || id === 'layers') return;
+    if (d.open) {
+      ui.acc[ui.stage] = id;
+      $('panelBody').querySelectorAll('details.sec[open]').forEach(function (o) { if (o !== d && o.dataset.sec !== 'layers') o.open = false; });
+      // bring the newly opened section's heading into view
+      var body = $('panelBody'), top = d.offsetTop - body.offsetTop;
+      if (top < body.scrollTop || top > body.scrollTop + body.clientHeight - 60) body.scrollTo({ top: Math.max(0, top - 4), behavior: reduceMotion ? 'auto' : 'smooth' });
+    } else if (ui.acc[ui.stage] === id) ui.acc[ui.stage] = null;
+  }, true);
+  function syncPanelButtons() { var b = $('accordionBtn'); if (b) b.setAttribute('aria-pressed', String(!!ui.accordion)); }
+  $('accordionBtn').addEventListener('click', function () {
+    ui.accordion = !ui.accordion; try { localStorage.setItem('stitch.accordion', ui.accordion ? '1' : '0'); } catch (e) {}
+    if (ui.accordion) { var first = $('panelBody').querySelector('details.sec[open]:not([data-sec="layers"])'); ui.acc[ui.stage] = first ? first.dataset.sec : ACC_DEFAULT[ui.stage]; }
+    else $('panelBody').querySelectorAll('details.sec').forEach(function (o) { ui.open[o.dataset.sec] = o.open; });
+    syncPanelButtons(); renderPanel();
+    toast(ui.accordion ? 'One section open at a time' : 'Sections open independently');
+  });
+  $('collapseBtn').addEventListener('click', function () {
+    $('panelBody').querySelectorAll('details.sec').forEach(function (o) { ui.open[o.dataset.sec] = false; });
+    ui.acc[ui.stage] = null; renderPanel();
+  });
+  syncPanelButtons();
   // rename on double-click
   $('panelBody').addEventListener('dblclick', function (e) {
     var b = e.target.closest('.layer .lname b'); if (!b) return;
@@ -1178,9 +1277,9 @@
   window.addEventListener('dragover', function (e) { if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) e.preventDefault(); });
   window.addEventListener('drop', function (e) {
     dragDepth = 0; $('drophint').hidden = true;
-    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { e.preventDefault(); importFile(e.dataTransfer.files[0]); }
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { e.preventDefault(); var df = e.dataTransfer.files[0]; if (isProjectFile(df)) openProjectFile(df); else importFile(df); }
   });
-  document.addEventListener('pointerdown', function (e) { if (pop && !pop.contains(e.target) && !e.target.closest('[data-color],[data-recolor],[data-band],#machineBtn')) closePop(); }, true);
+  document.addEventListener('pointerdown', function (e) { if (pop && !pop.contains(e.target) && !e.target.closest('[data-color],[data-recolor],[data-band],#machineBtn,#paletteBtn,#projectBtn')) closePop(); }, true);
 
   // ---------- keyboard shortcuts ----------
   var nudgeTimer = null;

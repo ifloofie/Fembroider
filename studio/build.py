@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble Stitch Studio:
+"""Assemble Fembroider:
   dist/artifact.html      single file for the claude.ai artifact (three.js from cdnjs)
   dist/test/index.html    same page with a local three.js, for headless tests
   ../desktop/app/         Electron renderer files (separate scripts, strict CSP)
@@ -17,7 +17,7 @@ def read(name):
 
 template = read('index.html')
 assets, engine, export, svgsize, machines = read('assets.gen.js'), read('engine.js'), read('export.js'), read('svgsize.js'), read('machines.js')
-app = '(STUDIO_ASSETS.ready || Promise.resolve()).then(function () {\n' + '\n'.join(read(n) for n in ['app_core.js', 'app_threads.js', 'app_scene.js', 'app_direction.js', 'app_tips.js', 'app_ui.js', 'app_export.js']) + '\n});\n'
+app = '(STUDIO_ASSETS.ready || Promise.resolve()).then(function () {\n' + '\n'.join(read(n) for n in ['app_core.js', 'app_threads.js', 'app_scene.js', 'app_direction.js', 'app_tips.js', 'app_ui.js', 'app_export.js', 'app_project.js', 'app_boot.js']) + '\n});\n'
 engine_source = 'var ENGINE_SOURCE = ' + json.dumps(engine).replace('</', '<\\/') + ';\n'
 
 def safe(js):

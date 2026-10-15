@@ -339,8 +339,8 @@
       var g = hoopObjs[k], on = k === doc.hoop, u = g.userData;
       g.visible = on || ui.allHoops;
       u.fill.opacity = on ? 0.2 : 0.06;
-      u.fill.color.set(on ? 0x8fb2e8 : 0xb5bec8);
-      u.edge.color.set(on ? (dark ? 0x6ea1ff : 0x2f6fe0) : 0x8a96a3);
+      u.fill.color.set(on ? accentHex(0.45) : 0xb5bec8);
+      u.edge.color.set(on ? accentHex(0) : 0x8a96a3);
       u.edge.opacity = on ? 0.95 : 0.45;
       var col = dark ? (on ? '#dfe5ee' : '#8d96a5') : (on ? '#1d2733' : '#7c8796');
       if (u.labCol !== col) { if (u.label.material.map) u.label.material.map.dispose(); u.label.material.map = labelTexture(u.labText, col); u.label.material.needsUpdate = true; u.labCol = col; }
@@ -353,12 +353,19 @@
     $('machineName').textContent = machine().name; $('machineHoop').textContent = /\d/.test(H.label) ? H.label + ' cm' : H.label + ' · ' + H.field[0] + '×' + H.field[1];
     requestDraw();
   }
+  // the UI accent (palette and light/dark) as a three.js colour, optionally lightened toward white
+  function accentHex(lighten) {
+    var v = (getComputedStyle(document.documentElement).getPropertyValue('--primary') || '#196ef0').trim();
+    if (!/^#[0-9a-f]{6}$/i.test(v)) v = '#196ef0';
+    var n = parseInt(v.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255, t = lighten || 0;
+    return (Math.round(r + (255 - r) * t) << 16) | (Math.round(g + (255 - g) * t) << 8) | Math.round(b + (255 - b) * t);
+  }
   function onSceneTheme() {
     var d = isDark(), pu = plateMat.uniforms;
     pu.uBase.value.fromArray(d ? [0.055, 0.06, 0.07] : [0.60, 0.62, 0.65]);
     pu.uMinor.value.fromArray(d ? [0.10, 0.11, 0.125] : [0.46, 0.48, 0.52]);
     pu.uMajor.value.fromArray(d ? [0.19, 0.21, 0.24] : [0.34, 0.36, 0.40]);
-    pu.uFieldCol.value.fromArray(d ? [0.25, 0.45, 1.0] : [0.03, 0.16, 0.75]);
+    var ac = accentHex(d ? 0.15 : 0); pu.uFieldCol.value.fromArray([((ac >> 16) & 255) / 255, ((ac >> 8) & 255) / 255, (ac & 255) / 255].map(function (c) { return Math.pow(c, 2.2); }));
     styleHoops(); buildGizmo(); requestDraw();
   }
 
@@ -370,7 +377,7 @@
     while (gizmo.children.length) { var c = gizmo.children.pop(); if (c.geometry) c.geometry.dispose(); }
     var L = selLayer(); if (!L || !L.visible || ui.stage !== 'design') { requestDraw(); return; }
     var corners = layerCorners(L); if (!corners) { requestDraw(); return; }
-    var blue = isDark() ? 0x6ea1ff : 0x196ef0, z = 6;
+    var blue = accentHex(0), z = 6;
     var box = new THREE.BufferGeometry().setFromPoints(corners.concat([corners[0]]).map(function (p) { return new THREE.Vector3(p[0], p[1], z); }));
     var line = new THREE.Line(box, gizmoMat(blue)); line.renderOrder = 10; gizmo.add(line);
     var hs = handleSize();
@@ -493,7 +500,7 @@
   }
 
   // ---- frame loop ----
-  var dirty = true, last = performance.now(), frames = [], lastGizmoDist = 0;
+  var dirty = true, last = performance.now(), frames = [], drawTimes = [], lastGizmoDist = 0;
   function requestDraw() { dirty = true; }
   function resize() {
     var r = canvas.getBoundingClientRect();
@@ -531,6 +538,7 @@
       ui.calls = renderer.info.render.calls;
       dirty = false;
       if (ui.bench) { frames.push(now - last); if (frames.length > 120) frames.shift(); }
+      drawTimes.push(now); if (drawTimes.length > 240) drawTimes.shift();
     }
     last = now;
     requestAnimationFrame(tick);
