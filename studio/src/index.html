@@ -99,7 +99,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, canvas:focus-vi
 .verlist li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; }
 .verlist b { font-size: 13.5px; } .verlist small { grid-column: 1; font-size: 12px; color: var(--muted); }
 .verlist button { grid-row: 1 / span 2; grid-column: 2; }
-.qbar { left: 14px; bottom: 62px; padding: 4px; display: flex; gap: 4px; align-items: center; }
+.qbar { left: 14px; bottom: 62px; padding: 4px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; max-width: calc(100% - 420px); }
+.qbar .vsep { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
 .qseg { display: flex; gap: 1px; padding: 2px; border-radius: 8px; background: var(--panel-2); }
 .qseg button { height: 30px; padding: 0 8px; border: 0; background: transparent; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); border-radius: 6px; cursor: pointer; }
 .qseg button:hover { color: var(--ink); }
@@ -470,7 +471,7 @@ select.field { padding: 0 6px; }
   .tip { display: none; }
   .hud, .workspace.tp-open .hud { top: 62px; left: 10px; max-width: calc(100% - 20px); }
   .viewbar { top: calc(56vh - 56px); bottom: auto; left: 10px; }
-  .qbar { top: calc(56vh - 104px); bottom: auto; left: 10px; }
+  .qbar { top: calc(56vh - 104px); bottom: auto; left: 10px; max-width: calc(100% - 20px); }
   .playbar { position: absolute; top: calc(56vh - 108px); bottom: auto; left: 10px; right: 10px; width: auto; transform: none; min-width: 0; }
   .hint { display: none; }
 }
@@ -551,6 +552,13 @@ select.field { padding: 0 6px; }
         <button type="button" data-q="2" aria-pressed="true" title="High: rounded, twisted stitches">High</button>
         <button type="button" data-q="3" aria-pressed="false" title="Ultra: two-ply thread with fibre detail, supersampled (heaviest)">Ultra</button>
       </div>
+      <span class="vsep" aria-hidden="true"></span>
+      <div class="qseg lseg" role="group" aria-label="Lighting">
+        <button type="button" data-light="top" aria-pressed="false" title="Lighting: from above, even">Top</button>
+        <button type="button" data-light="raking" aria-pressed="true" title="Lighting: low from the side, shows texture and gaps best">Raking</button>
+        <button type="button" data-light="soft" aria-pressed="false" title="Lighting: soft, diffuse">Soft</button>
+      </div>
+      <span class="vsep" aria-hidden="true"></span>
       <span class="fpsmini" id="fpsMini" title="Frames per second while the view is moving. The view only redraws when something changes, so it reads idle when still." aria-live="off"><b>—</b><small>fps</small></span>
     </div>
 

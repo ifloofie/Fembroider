@@ -544,11 +544,10 @@
     return threadSectionHtml() + qualityHtml() + infillHtml() + experimentalHtml() +
       sec('look', 'sheen', 'Preview', '',
         row('Play speed', seg('ui.speed', [[1, '1×'], [4, '4×'], [16, '16×']], { label: 'Playback speed' })) +
-        row('Lighting', seg('ui.light', [['top', 'Top'], ['raking', 'Raking'], ['soft', 'Soft']], { label: 'Lighting' })) +
         rangeRow('Twist', 'ui.twist', 8, 30, 1, 0, ' /in') +
         rangeRow('Sheen sharpness', 'ui.sharp', 10, 120, 1, 0, '') +
         rangeRow('Sheen strength', 'ui.spec', 0, 100, 1, 0, '%') +
-        '<p class="note">Play at the bottom of the view shows the needle path layer by layer, in sewing order. Graphics quality and the frame rate sit at the bottom of the view.</p>') +
+        '<p class="note">Play at the bottom of the view shows the needle path layer by layer, in sewing order. Graphics quality, lighting and the frame rate sit at the bottom left of the view.</p>') +
       sec('perf', 'gauge', 'Diagnostics', '',
         row('Stress test', seg('ui.copies', [[1, '1×'], [4, '4×'], [9, '9×'], [16, '16×']], { label: 'Copies' })) +
         '<div style="display:flex;align-items:end;justify-content:space-between;gap:12px"><div class="fps" id="fpsBig">—<small>fps</small></div>' +
@@ -910,6 +909,15 @@
   }
   document.querySelectorAll('.qseg [data-q]').forEach(function (b) { b.addEventListener('click', function () { setQuality(+b.dataset.q); }); });
   syncQuality();
+  // preview lighting, beside the quality buttons
+  function syncLight() { document.querySelectorAll('.lseg [data-light]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.light === ui.light)); }); }
+  document.querySelectorAll('.lseg [data-light]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      ui.light = b.dataset.light; try { localStorage.setItem('stitch.light', ui.light); } catch (e) {}
+      syncLight(); applyLook();
+    });
+  });
+  syncLight();
   var lastFps = 0;
   function updateFps() {
     var el = $('fpsMini'); if (!el) return;

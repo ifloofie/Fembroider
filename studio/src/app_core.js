@@ -178,7 +178,7 @@
   };
   function storedInt(k, def, lo, hi) { try { var v = parseInt(localStorage.getItem(k), 10); return v >= lo && v <= hi ? v : def; } catch (e) { return def; } }
   var ui = {
-    stage: 'design', tool: 'move', view: '3d', ortho: false, allHoops: false, fidelity: storedInt('stitch.quality', 2, 0, 3), light: 'raking', accordion: storedInt('stitch.accordion', 1, 0, 1) === 1,
+    stage: 'design', tool: 'move', view: '3d', ortho: false, allHoops: false, fidelity: storedInt('stitch.quality', 2, 0, 3), light: (function () { try { var v = localStorage.getItem('stitch.light'); return v === 'top' || v === 'soft' ? v : 'raking'; } catch (e) { return 'raking'; } })(), accordion: storedInt('stitch.accordion', 1, 0, 1) === 1,
     twist: 18, sharp: 55, spec: 45, copies: 1, bench: false, sew: 1, playing: false, speed: 1, snap: true,
     applyThemeAll: true, open: { experimental: false, perf: false }
   };

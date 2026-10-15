@@ -1,4 +1,4 @@
-# Fembroider — source (v0.15.0)
+# Fembroider — source (v0.15.1)
 
 Fembroider (formerly Stitch Studio) is an open-source embroidery digitizer with a 3D stitch preview.
 
@@ -60,6 +60,9 @@ Desktop (Windows installer):
     cd desktop
     npm ci
     npx electron-builder --win nsis --x64     # on Linux: WINEDEBUG=-all xvfb-run -a npx electron-builder ...
+
+Ready-built Windows installers are attached to the GitHub Releases (the 110 MB installer is too large to keep in
+the repository itself).
 
 ## Tests
 
