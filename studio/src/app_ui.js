@@ -167,7 +167,7 @@
   function seg(k, options, opts) {
     opts = opts || {};
     var cur = getPath(k);
-    return '<div class="seg" role="group"' + (opts.label ? ' aria-label="' + esc(opts.label) + '"' : '') + '>' + options.map(function (o) {
+    return '<div class="seg' + (opts.cls ? ' ' + opts.cls : '') + '" role="group"' + (opts.label ? ' aria-label="' + esc(opts.label) + '"' : '') + '>' + options.map(function (o) {
       return '<button type="button" data-set="' + k + '" data-v="' + o[0] + '" aria-pressed="' + String(cur === o[0]) + '"' + (opts.rerender ? ' data-rerender' : '') +
         (opts.disabled ? ' disabled' : '') + (o[3] ? ' title="' + esc(o[3]) + '"' : '') + '>' + o[1] + (o[2] ? '<small>' + o[2] + '</small>' : '') + '</button>';
     }).join('') + '</div>';
@@ -329,17 +329,41 @@
       '<div style="display:flex;gap:12px;align-items:center">' + (s.thumb ? '<img alt="" src="' + s.thumb + '" style="width:56px;height:56px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#fff">' : '') +
       '<div style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.name || L.name) + '</b><span class="note">' + kind + '</span></div></div>' +
       rangeRow('Size', 'L.p.size', 15, 190, 1, 0, ' mm') + threadHtml(L) +
-      (isSvg ? row('Colours', seg('L.p.palette', [['svg', 'From SVG fills'], ['auto', 'Reduce']], { rerender: true, label: 'Colour source' })) : '') +
-      (!isSvg || L.p.palette === 'auto' ? rangeRow('Max colours', 'L.p.maxColors', 2, 8, 1, 0, '') +
-        row('Artwork', seg('L.p.art', [['auto', 'Auto'], ['flat', 'Flat art'], ['painting', 'Painting']], { rerender: true, label: 'Artwork type' })) +
-        (L.p.art === 'flat' || (L.p.art === 'auto' && rt(L.id).result && rt(L.id).result.meta && rt(L.id).result.meta.painting === false) ? '' : rangeRow('Smoothing', 'L.p.blur', 0, 1.5, 0.1, 1, ' mm')) : '') +
-      check('L.p.removeBg', 'Remove background', {}) +
-      (rt(L.id).result && !rt(L.id).busy && !(rt(L.id).result.stitchCount > 0) ? '<p class="note err">Nothing here can be stitched at this size: every detail is thinner than a fill can show (about 0.9 mm). Make the picture bigger' + (!isSvg || L.p.palette === 'auto' ? ', lower Smoothing or use fewer colours' : ' or reduce its colours') + '.</p>' : '') +
-      '<p class="note">' + (!isSvg || L.p.palette === 'auto' ? (rt(L.id).result && rt(L.id).result.meta && rt(L.id).result.meta.painting === false
-        ? (L.p.art === 'flat' ? 'Flat art: edges are kept sharp. ' : 'This looks like flat artwork (a print, logo or line art), so its edges are kept sharp. Choose Painting to smooth it instead. ')
-        : 'Smoothing calms brush texture and grain in paintings and photos: more smoothing means fewer, larger areas and fewer jumps. ') : '') +
-      'Details thinner than about 0.9 mm are merged into neighbouring colours, since a fill cannot show them.</p>' +
+      '<div id="artBox">' + imageArtHtml(L, isSvg) + '</div>' +
       '<div class="lab" style="font-size:13.5px">Thread colours</div><div id="recolorBox">' + recolorHtml(L) + '</div>');
+  }
+  // how a picture becomes stitches: colour areas (flat art, paintings) or line art
+  function imageArtHtml(L, isSvg) {
+    var res = rt(L.id).result, meta = (res && res.meta) || {}, line = L.p.art === 'line', reduce = !isSvg || L.p.palette === 'auto';
+    var arts = isSvg && !reduce ? [['auto', 'Shapes'], ['line', 'Line art']] : [['auto', 'Auto'], ['flat', 'Flat art'], ['painting', 'Painting'], ['line', 'Line art']];
+    var h = (isSvg && !line ? row('Colours', seg('L.p.palette', [['svg', 'From SVG fills'], ['auto', 'Reduce']], { rerender: true, label: 'Colour source' })) : '') +
+      row('Artwork', seg('L.p.art', arts, { rerender: true, label: 'Artwork type', cls: arts.length > 3 ? 'grid2' : '' }));
+    var empty = res && !rt(L.id).busy && !(res.stitchCount > 0);
+    if (line) {
+      var st = meta.lineArt;
+      h += row('Lines', seg('L.p.lineWeight', [['auto', 'Auto'], ['single', 'Single'], ['triple', 'Triple']], { label: 'Line weight' })) +
+        row('Shading', seg('L.p.shading', [['hatch', 'Hatching'], ['solid', 'Solid'], ['none', 'Off']], { label: 'Shading' })) +
+        rangeRow('Ink level', 'L.p.ink', 0.2, 0.7, 0.05, 2, '') +
+        rangeRow('Stitch length', 'L.p.runLen', 1.5, 3.5, 0.1, 1, ' mm') +
+        (empty ? '<p class="note err">No ink found. Lower Ink level to pick up fainter lines.</p>' : '') +
+        '<p class="note">Lines are sewn as running stitch along their middle; shading too fine to follow becomes hatching, and solid black is filled. Lines closer than about 0.8 mm run together, so detailed engravings need a bigger size.</p>' +
+        (st && !rt(L.id).busy ? '<p class="note">' + nfmt(st.lines) + ' line run' + (st.lines === 1 ? '' : 's') + (st.hatchAreas ? ' · ' + nfmt(st.hatchAreas) + ' hatched area' + (st.hatchAreas === 1 ? '' : 's') : '') + '</p>' : '');
+      return h;
+    }
+    if (reduce) {
+      h += rangeRow('Max colours', 'L.p.maxColors', 2, 8, 1, 0, '') +
+        (L.p.art === 'flat' || (L.p.art === 'auto' && meta.painting === false) ? '' : rangeRow('Smoothing', 'L.p.blur', 0, 1.5, 0.1, 1, ' mm'));
+    }
+    h += check('L.p.removeBg', 'Remove background', {});
+    if (meta.lineHint && L.p.art === 'auto') h += '<div class="note suggest">Most of this picture is lines thinner than a fill can show. ' +
+      '<button type="button" class="btn sm" data-set="L.p.art" data-v="line" data-rerender>Sew it as line art</button></div>';
+    if (empty) h += '<p class="note err">Nothing here can be stitched at this size: every detail is thinner than a fill can show (about 0.9 mm). Make the picture bigger' +
+      (reduce ? ', lower Smoothing or use fewer colours' : ' or reduce its colours') + ', or choose Line art.</p>';
+    h += '<p class="note">' + (reduce ? (meta.painting === false
+        ? (L.p.art === 'flat' ? 'Flat art: edges are kept sharp. ' : 'This looks like flat artwork (a print or logo), so its edges are kept sharp. Choose Painting to smooth it instead. ')
+        : 'Smoothing calms brush texture and grain in paintings and photos: more smoothing means fewer, larger areas and fewer jumps. ') : '') +
+      'Details thinner than about 0.9 mm are merged into neighbouring colours, since a fill cannot show them.</p>';
+    return h;
   }
   function effectsHtml(L) {
     if (!L) return '';
@@ -634,6 +658,12 @@
     var li = document.querySelector('#layerList [data-id="' + id + '"]'), L = layerById(id);
     if (li && L) { var tmp = document.createElement('ul'); tmp.innerHTML = layerRowHtml(L); li.replaceWith(tmp.firstChild); }
     if (L && doc.sel === id) { var box = $('recolorBox'); if (box) box.innerHTML = recolorHtml(L); }
+    // the picture's notes depend on the finished render (line-art hint, run counts, nothing-to-stitch warning)
+    var art = L && doc.sel === id && L.type === 'image' && $('artBox');
+    if (art && !art.contains(document.activeElement)) {
+      var s0 = SOURCES.get(L.p.src) || {}, html = imageArtHtml(L, s0.kind === 'svg');
+      if (art.dataset.html !== html.replace(/f\d+/g, '')) { art.innerHTML = html; art.dataset.html = html.replace(/f\d+/g, ''); }
+    }
     updateAction();
   }
   function addLayer(L) {

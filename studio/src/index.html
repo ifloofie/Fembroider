@@ -160,6 +160,10 @@ details.sec > summary .meta + .chev { margin-left: 8px; }
 .row output, .val { font-family: var(--font-data); font-size: 12.5px; color: var(--muted); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
 .note { font-size: 12.5px; color: var(--muted); margin: 0; line-height: 1.5; }
 .note.warn { color: var(--warn); } .note.err { color: var(--bad); }
+.note.suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink); }
+.btn.sm { height: 30px; padding: 0 11px; font-size: 13px; }
+.seg.grid2 { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+#artBox { display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
 input[type=range] { accent-color: var(--primary); }
 input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--primary); }
 .field { height: 34px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel); padding: 0 10px; min-width: 0; width: 100%; }

@@ -1,9 +1,10 @@
-# Stitch Studio — source (v0.13.0)
+# Stitch Studio — source (v0.14.0)
 
 Embroidery digitizer and 3D stitch preview. Machines: 197 home and commercial models from 17 brands (Brother,
 Baby Lock, Janome, Elna, BERNINA, bernette, PFAFF, Husqvarna Viking, Singer, Poolin, Tajima, Barudan, Happy, SWF,
 ZSK, Melco, Ricoma), each with its hoops and its own file format: PES, JEF, EXP + INF, VP3, XXX or DST, plus the
-Bernina Deco 330's EXP+ card set. Text with 50 fonts and swoops, the full emoji table, imported SVG/bitmaps, Pride
+Bernina Deco 330's EXP+ card set. Text with 50 fonts and swoops, the full emoji table, imported SVG/bitmaps (flat art,
+paintings, or line art sewn as running / triple stitch with hatched shading), Pride
 colourways, stripes and dithered gradients, thread/needle/fabric-aware density, a PBR texture bake, and a
 Windows desktop build.
 
@@ -13,6 +14,7 @@ Code licence: MIT (see `LICENSE`). Bundled fonts, emoji artwork and thread chart
 
     studio/                  the app and the stitch engine (plain JavaScript, no framework)
       src/engine.js          masks → islands → tatami / satin / outline chords, underlay, swoops, travel grids
+                             line art: ink vs. paper, skeleton → Euler-routed running stitch, tone → hatching
       src/export.js          sewing order (left-to-right sweep), travel routing, EXP / INF / JEF / DST / PES / VP3 / XXX / BMP writers, zip
       src/machines.js        machine catalogue: models, hoops, file format, trimming, speed (searchable from the top bar)
       src/app_*.js           UI: core state + machines, threads, 3D scene, direction tool, tips, panels, export & bake
@@ -57,6 +59,8 @@ Desktop (Windows installer):
     node test/t_formats.mjs && python3 test/check_formats.py   # every format read back with pyembroidery
     node test/stress.mjs fonts|emoji|images [start] [end]      # stress sweep: travel, jumps, stitch outliers (JSON lines)
     node test/trace_jumps.mjs <emoji code | font:Family:Text | img:path>   # every jump of one design, for debugging
+    node test/t_lineart.mjs <image> [sizeMM] [crop] [key=value]       # line-art mode: metrics + source | stitches picture
+    LINE=1 DIR=test/line_images node test/stress.mjs images           # line-art sweep (synthetic drawings are in the repo)
 
 The image sweep reads test/stress_images/ (not in the repo: add your own public-domain paintings and clipart).
     node test/quality.mjs         # stitch-quality harness (coverage, show-through, crossings, edge angles)

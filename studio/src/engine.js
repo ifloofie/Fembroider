@@ -1618,12 +1618,19 @@ var StitchEngine = (function () {
   }
 
   // fill colours in SVG paint order (first appearance), for flat-colour artwork like Twemoji
+  // the SVG's own colours in paint order: fills and strokes (a line drawing is all strokes), as hex, named or rgb()
+  var NAMED = { black: '#000000', white: '#ffffff', red: '#ff0000', green: '#008000', blue: '#0000ff', navy: '#000080', gray: '#808080', grey: '#808080',
+    darkgray: '#a9a9a9', darkgrey: '#a9a9a9', dimgray: '#696969', dimgrey: '#696969', silver: '#c0c0c0', maroon: '#800000', brown: '#a52a2a', orange: '#ffa500',
+    yellow: '#ffff00', purple: '#800080', teal: '#008080', olive: '#808000', gold: '#ffd700', pink: '#ffc0cb', darkred: '#8b0000', darkgreen: '#006400', darkblue: '#00008b' };
   function parseSvgPalette(svg) {
     var out = [], seen = {};
-    var re = /fill\s*[=:]\s*["']?\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3})\b/g, m;
+    var re = /(?:fill|stroke)\s*[=:]\s*["']?\s*(#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)|[a-zA-Z]+)/g, m;
     while ((m = re.exec(svg))) {
-      var h = rgbToHex(hexToRgb(m[1]));
-      if (!seen[h]) { seen[h] = 1; out.push(h); }
+      var v = m[1], h = null;
+      if (v[0] === '#') h = rgbToHex(hexToRgb(v));
+      else if (/^rgb/i.test(v)) { var n = v.match(/\d+/g).map(Number); h = rgbToHex(n); }
+      else if (NAMED[v.toLowerCase()]) h = NAMED[v.toLowerCase()];
+      if (h && !seen[h]) { seen[h] = 1; out.push(h); }
     }
     return out;
   }
@@ -1951,6 +1958,24 @@ var StitchEngine = (function () {
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(src, ox, oy, dw, dh);
     var d = ctx.getImageData(0, 0, W, H).data;
+    // line-art check on the sharp picture: how much of the dark ink lies in strokes too thin to fill
+    var inkInfo = spec.noHint ? null : (function () {
+      var lum = new Float32Array(W * H), vals = [], chroma = 0, nc = 0;
+      for (var q = 0; q < W * H; q++) {
+        var a = d[q * 4 + 3] / 255; lum[q] = a * (0.299 * d[q * 4] + 0.587 * d[q * 4 + 1] + 0.114 * d[q * 4 + 2]) + (1 - a) * 255;
+        if ((q & 7) === 0) { vals.push(lum[q]); if (a > 0.5) { chroma += Math.max(d[q * 4], d[q * 4 + 1], d[q * 4 + 2]) - Math.min(d[q * 4], d[q * 4 + 1], d[q * 4 + 2]); nc++; } }
+      }
+      vals.sort(function (a, b) { return a - b; });
+      var paperL = vals[Math.floor(vals.length * 0.9)] || 255, m = new Uint8Array(W * H), n = 0, sat = 0, ns = 0;
+      for (var q2 = 0; q2 < W * H; q2++) if (lum[q2] < 0.55 * paperL) { m[q2] = 1; n++; if ((q2 & 15) === 0) { sat += Math.max(d[q2 * 4], d[q2 * 4 + 1], d[q2 * 4 + 2]) - Math.min(d[q2 * 4], d[q2 * 4 + 1], d[q2 * 4 + 2]); ns++; } }
+      var dA = edt(m, false), ridge = 0, thin = 0, inPic = 0;
+      for (var q3 = 0; q3 < W * H; q3++) if (d[q3 * 4 + 3] > 128) inPic++;
+      for (var hy = 1; hy < H - 1; hy++) for (var hx = 1; hx < W - 1; hx++) {
+        var hp = hy * W + hx, v0 = dA[hp]; if (!v0) continue;
+        if (v0 >= dA[hp - 1] && v0 >= dA[hp + 1] && v0 >= dA[hp - W] && v0 >= dA[hp + W]) { ridge++; if (v0 <= 4.5) thin++; }
+      }
+      return { paper: paperL, thin: ridge ? thin / ridge : 0, share: inPic ? n / inPic : 0, sat: ns ? sat / ns : 0, chroma: nc ? chroma / nc : 0 };
+    })();
     // palette
     var pal = (spec.palette || []).map(hexToRgb), autoPal = !pal.length, graphic = !autoPal;
     // SVG artwork with a dozen-plus fills (coats of arms, detailed clipart): merge the closest pair of colours until
@@ -2182,7 +2207,372 @@ var StitchEngine = (function () {
       });
       colours.sort(function (a, b) { return b.pieces - a.pieces || b.area - a.area; });
     }
-    return { colours: colours, bgRemoved: bgIndex >= 0 ? rgbToHex(pal[bgIndex]) : null, painting: autoPal && !graphic, near: LASTNEAR };
+    return { colours: colours, bgRemoved: bgIndex >= 0 ? rgbToHex(pal[bgIndex]) : null, painting: autoPal && !graphic, near: LASTNEAR, ink: inkInfo };
+  }
+
+  // ---------- line art: engravings, ink drawings, woodcuts ----------
+  // One thread, the ink colour. Thin ink lines are traced along their centre and sewn as running stitch (a triple
+  // "bean" stitch for bold lines), each connected network in one go where retracing a short stretch saves a jump.
+  // Shading hatched too finely to trace becomes running-stitch hatching at a sewable spacing, with the original's
+  // tone and direction. Solid black areas are filled like any other shape.
+  function boxBlurGrid(a, w, h, r) {
+    var b = new Float32Array(w * h), o = new Float32Array(w * h);
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+      var s = 0, n = 0;
+      for (var k = -r; k <= r; k++) { var xx = x + k; if (xx >= 0 && xx < w) { s += a[y * w + xx]; n++; } }
+      b[y * w + x] = s / n;
+    }
+    for (var y2 = 0; y2 < h; y2++) for (var x2 = 0; x2 < w; x2++) {
+      var s2 = 0, n2 = 0;
+      for (var k2 = -r; k2 <= r; k2++) { var yy = y2 + k2; if (yy >= 0 && yy < h) { s2 += b[yy * w + x2]; n2++; } }
+      o[y2 * w + x2] = s2 / n2;
+    }
+    return o;
+  }
+  // the paper's brightness around each pixel (local maximum, smoothed), so yellowed or unevenly lit paper isn't ink
+  function paperLevel(grey) {
+    var B = 4, w = Math.ceil(W / B), h = Math.ceil(H / B), m = new Float32Array(w * h);
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) { var k = ((y / B) | 0) * w + ((x / B) | 0); if (grey[y * W + x] > m[k]) m[k] = grey[y * W + x]; }
+    var R = Math.round(5 * PX / B), t = new Float32Array(w * h), u = new Float32Array(w * h);
+    for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) { var mx = 0; for (var q = Math.max(0, i - R); q <= Math.min(w - 1, i + R); q++) if (m[j * w + q] > mx) mx = m[j * w + q]; t[j * w + i] = mx; }
+    for (var i2 = 0; i2 < w; i2++) for (var j2 = 0; j2 < h; j2++) { var my = 0; for (var q2 = Math.max(0, j2 - R); q2 <= Math.min(h - 1, j2 + R); q2++) if (t[q2 * w + i2] > my) my = t[q2 * w + i2]; u[j2 * w + i2] = my; }
+    var sm = boxBlurGrid(boxBlurGrid(u, w, h, 3), w, h, 3);
+    // a big black area must not become its own "paper": never darker than most of the page's paper
+    var sorted = Array.prototype.slice.call(m).sort(function (a, b) { return a - b; }), p90 = sorted[Math.floor(sorted.length * 0.9)] || 255;
+    var out = new Float32Array(W * H);
+    for (var y3 = 0; y3 < H; y3++) for (var x3 = 0; x3 < W; x3++) {
+      var fx = Math.min(w - 1.001, Math.max(0, x3 / B - 0.5)), fy = Math.min(h - 1.001, Math.max(0, y3 / B - 0.5)), x0 = fx | 0, y0 = fy | 0, ax = fx - x0, ay = fy - y0;
+      var x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
+      var v = (sm[y0 * w + x0] * (1 - ax) + sm[y0 * w + x1] * ax) * (1 - ay) + (sm[y1 * w + x0] * (1 - ax) + sm[y1 * w + x1] * ax) * ay;
+      out[y3 * W + x3] = Math.max(v, 0.85 * p90);
+    }
+    return out;
+  }
+  // polyline (mm) -> needle points: simplified, then split so no stitch is longer than runMM, and none shorter than ~0.45 mm
+  function simplifyDP(p, tol) {
+    if (p.length < 3) return p.slice();
+    var keep = new Uint8Array(p.length); keep[0] = keep[p.length - 1] = 1;
+    var st = [[0, p.length - 1]];
+    while (st.length) {
+      var s = st.pop(), a = p[s[0]], b = p[s[1]], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1e-9, bi = -1, bd = tol;
+      for (var i = s[0] + 1; i < s[1]; i++) { var d = Math.abs((p[i][0] - a[0]) * dy - (p[i][1] - a[1]) * dx) / L; if (L < 1e-6) d = Math.hypot(p[i][0] - a[0], p[i][1] - a[1]); if (d > bd) { bd = d; bi = i; } }
+      if (bi > 0) { keep[bi] = 1; st.push([s[0], bi], [bi, s[1]]); }
+    }
+    return p.filter(function (q, i) { return keep[i]; });
+  }
+  function needlePoints(p, runMM) {
+    var q = simplifyDP(p, 0.06), out = [q[0]];
+    for (var i = 1; i < q.length; i++) {
+      var a = out[out.length - 1], b = q[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L < 0.45 && i < q.length - 1) continue;
+      var n = Math.max(1, Math.ceil(L / runMM - 0.15));
+      for (var k = 1; k <= n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]);
+    }
+    if (out.length > 2 && Math.hypot(out[out.length - 1][0] - out[out.length - 2][0], out[out.length - 1][1] - out[out.length - 2][1]) < 0.3) out.splice(out.length - 2, 1);
+    return out;
+  }
+
+  var LASTLINE = null;
+  function lineArt(createCanvas, spec, marginMM) {
+    var src = spec.source, sw = src.width, sh = src.height;
+    var sizePx = Math.max(5, spec.sizeMM || 60) * PX, sc = sizePx / Math.max(sw, sh);
+    var dw = Math.max(1, Math.round(sw * sc)), dh = Math.max(1, Math.round(sh * sc)), mpx = Math.ceil(marginMM * PX);
+    setMask(Math.ceil((dw + 2 * mpx) / 200) * 200, Math.ceil((dh + 2 * mpx) / 200) * 200);
+    var cv = createCanvas(W, H), ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
+    ctx.imageSmoothingEnabled = true;
+    if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, Math.round((W - dw) / 2), Math.round((H - dh) / 2), dw, dh);
+    var d = ctx.getImageData(0, 0, W, H).data, N = W * H;
+    var runMM = Math.max(1, Math.min(4, spec.runMM || 2)), thr = spec.inkLevel > 0 ? spec.inkLevel : 0.4;
+    var weight = spec.lineWeight || 'auto', shading = spec.shading || 'hatch';
+
+    // 1. darkness against the local paper (transparent = paper)
+    var grey = new Float32Array(N);
+    for (var i = 0; i < N; i++) { var al = d[i * 4 + 3] / 255; grey[i] = al * (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) + (1 - al) * 255; }
+    var paper = paperLevel(grey), dk = new Float32Array(N), ink = newMask(), ir = 0, ig = 0, ib = 0, iw = 0;
+    for (var i1 = 0; i1 < N; i1++) {
+      var v = Math.max(0, Math.min(1, (paper[i1] - grey[i1]) / Math.max(60, paper[i1])));
+      dk[i1] = v; if (v > thr) ink[i1] = 1;
+      else if (v > thr * 0.55) ink[i1] = 2; // weak: kept only where it joins strong ink (faint stretches of a line)
+      if (v > 0.55 && d[i1 * 4 + 3] > 128) { var wv = v * v; ir += d[i1 * 4] * wv; ig += d[i1 * 4 + 1] * wv; ib += d[i1 * 4 + 2] * wv; iw += wv; }
+    }
+    var hst = []; for (var h0 = 0; h0 < N; h0++) if (ink[h0] === 1) hst.push(h0);
+    while (hst.length) {
+      var hp = hst.pop(), hx = hp % W;
+      var hn = [hx > 0 ? hp - 1 : -1, hx < W - 1 ? hp + 1 : -1, hp - W, hp + W];
+      for (var hk = 0; hk < 4; hk++) { var hq = hn[hk]; if (hq >= 0 && hq < N && ink[hq] === 2) { ink[hq] = 1; hst.push(hq); } }
+    }
+    for (var h1 = 0; h1 < N; h1++) if (ink[h1] === 2) ink[h1] = 0;
+    var inkColour = iw ? rgbToHex([ir / iw, ig / iw, ib / iw]) : '#1a1a1a';
+    if (spec.palette && spec.palette.length) { // an SVG's darkest fill is its ink
+      var darkest = spec.palette.slice().sort(function (a, b) { var A = hexToRgb(a), Bc = hexToRgb(b); return (A[0] + A[1] + A[2]) - (Bc[0] + Bc[1] + Bc[2]); })[0];
+      if (darkest) inkColour = darkest;
+    }
+    // specks of dust and paper grain
+    var isl0 = islands(ink);
+    isl0.list.forEach(function (I) { if (I.area >= 12) return; for (var y = I.minY; y <= I.maxY; y++) for (var x = I.minX; x <= I.maxX; x++) if (isl0.lab[y * W + x] === I.id) ink[y * W + x] = 0; });
+
+    // 2. mass: ink that is wide once gaps under 0.4 mm are closed (solid black, or hatching too fine to trace)
+    var closed = spec.closePx ? erodeMask(dilateMask(ink, spec.closePx), spec.closePx) : ink;
+    var mass = dilateMask(erodeMask(closed, 5), 5);
+    for (var i2 = 0; i2 < N; i2++) if (mass[i2] && !closed[i2]) mass[i2] = 0;
+    var tone = blur(dk, 4, 2);
+    // classes inside the mass: 3 solid, 2 crosshatch, 1 single hatch; smoothed so areas don't speckle
+    var cls = new Uint8Array(N);
+    for (var i3 = 0; i3 < N; i3++) if (mass[i3]) cls[i3] = tone[i3] > 0.72 ? 3 : tone[i3] > 0.55 ? 2 : 1;
+    if (shading === 'solid') for (var i3b = 0; i3b < N; i3b++) if (mass[i3b]) cls[i3b] = 3;
+    // majority vote per pixel (each class's share blurred over ~1.7 mm), one class at a time to keep memory low
+    function majority(labels, ks, radius, where) {
+      var bestV = new Float32Array(N), bestK = new Uint8Array(N), a = new Float32Array(N);
+      ks.forEach(function (k) {
+        for (var q = 0; q < N; q++) a[q] = labels[q] === k && where(q) ? 1 : 0;
+        var bl = blur(a, radius, 1);
+        for (var q2 = 0; q2 < N; q2++) if (bl[q2] > bestV[q2]) { bestV[q2] = bl[q2]; bestK[q2] = k; }
+      });
+      return bestK;
+    }
+    var anyMass = false; for (var i4a = 0; i4a < N; i4a++) if (mass[i4a]) { anyMass = true; break; }
+    if (anyMass) { var vote = majority(cls, [1, 2, 3], 8, function () { return true; }); for (var i4 = 0; i4 < N; i4++) if (mass[i4] && vote[i4]) cls[i4] = vote[i4]; }
+    // small blots are thick bits of line (where strokes meet or swell) or dots: filled solid if dark, else traced
+    var mi = islands(mass);
+    mi.list.forEach(function (I) {
+      if (I.area >= (spec.massMinPx || 800)) return;
+      var t = 0;
+      for (var y = I.minY; y <= I.maxY; y++) for (var x = I.minX; x <= I.maxX; x++) if (mi.lab[y * W + x] === I.id) t += tone[y * W + x];
+      var dot = I.area >= 150 && t / I.area > 0.6;
+      for (var y2 = I.minY; y2 <= I.maxY; y2++) for (var x2 = I.minX; x2 <= I.maxX; x2++) {
+        var p2 = y2 * W + x2; if (mi.lab[p2] !== I.id) continue;
+        if (dot) cls[p2] = 3; else { cls[p2] = 0; mass[p2] = 0; }
+      }
+    });
+    // hatch direction: the structure tensor of the darkness says which way the original's strokes run
+    var t0 = anyMass ? blur(dk, 1, 1) : dk, jxx = new Float32Array(N), jyy = new Float32Array(N), jxy = new Float32Array(N);
+    for (var y5 = 1; y5 < H - 1; y5++) for (var x5 = 1; x5 < W - 1; x5++) {
+      var p5 = y5 * W + x5; if (!mass[p5]) continue;
+      var gx = t0[p5 + 1] - t0[p5 - 1], gy = t0[p5 + W] - t0[p5 - W];
+      jxx[p5] = gx * gx; jyy[p5] = gy * gy; jxy[p5] = gx * gy;
+    }
+    if (anyMass) { jxx = blur(jxx, 7, 2); jyy = blur(jyy, 7, 2); jxy = blur(jxy, 7, 2); }
+    // split hatch areas by direction (6 bins of 30 degrees) so the stitching follows the form like the engraver's did
+    var NB6 = 6, bin = new Uint8Array(N);
+    for (var i6 = 0; i6 < N; i6++) if (cls[i6] && cls[i6] < 3) {
+      var th = 0.5 * Math.atan2(2 * jxy[i6], jxx[i6] - jyy[i6]) + Math.PI / 2; // along the strokes
+      th = ((th % Math.PI) + Math.PI) % Math.PI;
+      bin[i6] = Math.round(th / (Math.PI / NB6)) % NB6;
+    }
+    if (anyMass) {
+      var bins6 = []; for (var b6 = 0; b6 < NB6; b6++) bins6.push(b6);
+      var hatchy = function (q) { return cls[q] && cls[q] < 3; }, bv = majority(bin, bins6, 10, hatchy);
+      for (var i7 = 0; i7 < N; i7++) if (hatchy(i7)) bin[i7] = bv[i7];
+    }
+
+    var solid = newMask(), nSolid = 0;
+    for (var i8 = 0; i8 < N; i8++) if (cls[i8] === 3) { solid[i8] = 1; nSolid++; }
+    var gid = 0, hatch = [], hatchMask = newMask(), stats = { hatchAreas: 0, lines: 0, retraceMM: 0, beanMM: 0, runMM: 0 };
+    // 3. hatching: per (class, direction) area, rows of running stitch; neighbouring row ends joined along the edge
+    if (shading !== 'none' && shading !== 'solid') {
+      var lab = new Int32Array(N).fill(-1), areas = [];
+      for (var s0 = 0; s0 < N; s0++) {
+        if (!cls[s0] || cls[s0] === 3 || lab[s0] >= 0) continue;
+        var id = areas.length, key = cls[s0] * 8 + bin[s0], st = [s0], A = { id: id, cls: cls[s0], bin: bin[s0], area: 0, minX: W, maxX: 0, minY: H, maxY: 0, t: 0, xx: 0, yy: 0, xy: 0 };
+        lab[s0] = id;
+        while (st.length) {
+          var p = st.pop(), px = p % W, py = (p / W) | 0;
+          A.area++; A.t += tone[p]; A.xx += jxx[p]; A.yy += jyy[p]; A.xy += jxy[p];
+          if (px < A.minX) A.minX = px; if (px > A.maxX) A.maxX = px; if (py < A.minY) A.minY = py; if (py > A.maxY) A.maxY = py;
+          var nb = [px > 0 ? p - 1 : -1, px < W - 1 ? p + 1 : -1, p >= W ? p - W : -1, p < N - W ? p + W : -1];
+          for (var z = 0; z < 4; z++) { var q = nb[z]; if (q >= 0 && lab[q] < 0 && cls[q] && cls[q] * 8 + bin[q] === key) { lab[q] = id; st.push(q); } }
+        }
+        areas.push(A);
+      }
+      // crumbs under 3 mm² join the neighbouring area they share the most border with: each would cost a jump
+      var root = areas.map(function (A, k) { return k; });
+      var find = function (k) { while (root[k] !== k) k = root[k] = root[root[k]]; return k; };
+      areas.slice().sort(function (a, b) { return a.area - b.area; }).forEach(function (A) {
+        if (A.area >= 300) return;
+        var cnt = new Map(), me = find(A.id);
+        for (var y = A.minY; y <= A.maxY; y++) for (var x = A.minX; x <= A.maxX; x++) {
+          var p = y * W + x; if (lab[p] !== A.id) continue;
+          var nb = [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W];
+          for (var z = 0; z < 4; z++) { var q = nb[z]; if (q < 0 || q >= N || lab[q] < 0) continue; var r = find(lab[q]); if (r !== me) cnt.set(r, (cnt.get(r) || 0) + 1); }
+        }
+        var best = -1, bc = 0; cnt.forEach(function (c, r) { if (c > bc) { bc = c; best = r; } });
+        if (best < 0) return;
+        var R = areas[best]; root[me] = best;
+        R.area += A.area; R.t += A.t; R.xx += A.xx; R.yy += A.yy; R.xy += A.xy;
+        R.minX = Math.min(R.minX, A.minX); R.maxX = Math.max(R.maxX, A.maxX); R.minY = Math.min(R.minY, A.minY); R.maxY = Math.max(R.maxY, A.maxY);
+      });
+      for (var r0 = 0; r0 < N; r0++) if (lab[r0] >= 0) { lab[r0] = find(lab[r0]); if (areas[lab[r0]].area >= 80) hatchMask[r0] = 1; }
+      areas.forEach(function (A) {
+        if (find(A.id) !== A.id || A.area < 80) return;
+        var tm = A.t / A.area, ang = 0.5 * Math.atan2(2 * A.xy, A.xx - A.yy) + Math.PI / 2;
+        var coh = Math.hypot(A.xx - A.yy, 2 * A.xy) / ((A.xx + A.yy) || 1);
+        if (coh < 0.12) ang = (A.bin * Math.PI / NB6) || Math.PI / 4;
+        var layers = A.cls === 2 ? [ang, ang + Math.PI / 2] : [ang];
+        var spacing = Math.max(0.8, Math.min(2.6, 0.36 * layers.length / Math.max(0.12, tm)));
+        var inside = function (x, y) { return x >= 0 && y >= 0 && x < W && y < H && lab[y * W + x] === A.id; };
+        var near = function (xm, ym) { var x = Math.round(xm * PX), y = Math.round(ym * PX); for (var oy = -2; oy <= 2; oy++) for (var ox = -2; ox <= 2; ox++) if (inside(x + ox, y + oy)) return true; return false; };
+        stats.hatchAreas++;
+        layers.forEach(function (a) {
+          var rows = tatami(inside, A, a, spacing, runMM, 6), prev = null;
+          rows.forEach(function (c) {
+            if (prev && (Math.abs(prev[2] - c[0]) > 1e-6 || Math.abs(prev[3] - c[1]) > 1e-6)) {
+              var g = Math.hypot(c[0] - prev[2], c[1] - prev[3]);
+              if (g <= 1.7 * spacing + 0.4 && near((c[0] + prev[2]) / 2, (c[1] + prev[3]) / 2)) hatch.push([prev[2], prev[3], c[0], c[1], 6, -1, 0, gid]);
+              else gid++;
+            }
+            hatch.push([c[0], c[1], c[2], c[3], 6, -1, 0, gid]); prev = c;
+          });
+          gid++;
+        });
+      });
+    }
+
+    // 4. lines: what's left of the ink, traced along its centre
+    var grownMass = dilateMask(mass, 1), lineMask = newMask();
+    for (var i9 = 0; i9 < N; i9++) if (ink[i9] && !grownMass[i9]) lineMask[i9] = 1;
+    var isl1 = islands(lineMask);
+    isl1.list.forEach(function (I) { if (I.area >= 10) return; for (var y = I.minY; y <= I.maxY; y++) for (var x = I.minX; x <= I.maxX; x++) if (isl1.lab[y * W + x] === I.id) lineMask[y * W + x] = 0; });
+    var widthF = edt(lineMask, false), g = skeletonGraph(thin(lineMask)), cl = g.clusters;
+    var br = g.branches.filter(function (b) { return b.pts.length > 1; });
+    // prune spurs (short twigs the thinning grows toward corners) and lone specks
+    for (var pass = 0; pass < 2; pass++) {
+      var deg = cl.map(function () { return 0; });
+      br.forEach(function (b) { if (b.a >= 0) deg[b.a]++; if (b.b >= 0) deg[b.b]++; });
+      br = br.filter(function (b) {
+        if (b.cycle) return b.len >= 6;
+        var freeA = b.a < 0 || deg[b.a] === 1, freeB = b.b < 0 || deg[b.b] === 1;
+        if (freeA && freeB) return b.len >= 8;
+        if (!freeA && !freeB) return true;
+        var j = freeA ? cl[b.b] : cl[b.a];
+        return b.len >= Math.max(4, sampleD(widthF, j.x, j.y) * 1.5);
+      });
+    }
+    // declutter: where lines crowd closer than a thread can keep apart, short strokes that mostly run alongside
+    // another line add only clutter and jumps. Longest first, each stroke claims a band 0.6 mm either side.
+    if (spec.declutter !== false) {
+      var occ = new Uint8Array(N), R0 = 6, dropped = 0;
+      br.slice().sort(function (a, b) { return b.len - a.len; }).forEach(function (b) {
+        var n = 0, crowd = 0, ends = 8;
+        if (b.len < 40) {
+          var acc = 0;
+          for (var k = 0; k < b.pts.length; k++) {
+            if (k) acc += Math.hypot(b.pts[k][0] - b.pts[k - 1][0], b.pts[k][1] - b.pts[k - 1][1]);
+            if (acc < ends || b.len - acc < ends) continue;
+            n++; if (occ[Math.round(b.pts[k][1]) * W + Math.round(b.pts[k][0])]) crowd++;
+          }
+          if (n >= 3 && crowd / n > 0.6) { b.drop = true; dropped++; return; }
+        }
+        b.pts.forEach(function (q) {
+          var qx = Math.round(q[0]), qy = Math.round(q[1]);
+          for (var oy = -R0; oy <= R0; oy++) for (var ox = -R0; ox <= R0; ox++) {
+            if (ox * ox + oy * oy > R0 * R0) continue;
+            var xx = qx + ox, yy = qy + oy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) occ[yy * W + xx] = 1;
+          }
+        });
+      });
+      br = br.filter(function (b) { return !b.drop; });
+      stats.decluttered = dropped;
+    }
+    // each branch: smoothed centreline in mm, needle points, and how bold the line is
+    br.forEach(function (b) {
+      var p = b.pts.length > 3 ? smoothOpen(resampleOpen(b.pts, 2), 2, 2) : b.pts;
+      b.mm = needlePoints(p.map(function (q) { return [q[0] / PX, q[1] / PX]; }), runMM);
+      var wsum = 0; b.pts.forEach(function (q) { wsum += sampleD(widthF, q[0], q[1]); });
+      b.width = 2 * wsum / b.pts.length / PX;
+      b.bold = weight === 'triple' || (weight === 'auto' && b.width >= 0.65);
+    });
+    // Euler routing: pair up dead ends that are close along the lines and retrace between them, so each network
+    // sews in as few unbroken runs as possible (retracing a short stretch beats a jump and a trim)
+    var edges = [], adj = cl.map(function () { return []; }), trails = [];
+    br.forEach(function (b, bi) {
+      if (b.cycle || b.a < 0 || b.b < 0) { trails.push([{ b: bi, rev: false }]); return; }
+      var e = edges.length; edges.push({ u: b.a, v: b.b, b: bi, len: b.len }); adj[b.a].push(e); adj[b.b].push(e);
+    });
+    var odd = []; adj.forEach(function (l, n) { if (l.length % 2) odd.push(n); });
+    var RETRACE = (spec.retraceMM || 6) * PX, pairs = [];
+    odd.forEach(function (s) {
+      var dist = new Map(), via = new Map(), heap = [[0, s]]; dist.set(s, 0);
+      while (heap.length) {
+        var bi = 0; for (var h = 1; h < heap.length; h++) if (heap[h][0] < heap[bi][0]) bi = h;
+        var top = heap.splice(bi, 1)[0], du = top[0], u = top[1];
+        if (du > dist.get(u)) continue;
+        if (u !== s && adj[u].length % 2) pairs.push({ a: s, b: u, d: du, via: via, end: u });
+        adj[u].forEach(function (e) {
+          var E = edges[e], w = E.u === u ? E.v : E.u, nd = du + E.len;
+          if (nd <= RETRACE && (!dist.has(w) || nd < dist.get(w))) { dist.set(w, nd); via.set(w, e); heap.push([nd, w]); }
+        });
+      }
+    });
+    pairs.sort(function (x, y) { return x.d - y.d; });
+    var matched = new Uint8Array(cl.length), nOrig = edges.length;
+    pairs.forEach(function (pr) {
+      if (matched[pr.a] || matched[pr.b]) return;
+      matched[pr.a] = matched[pr.b] = 1;
+      for (var n = pr.end; n !== pr.a;) {
+        var e = pr.via.get(n), E = edges[e], w = E.u === n ? E.v : E.u;
+        var ne = edges.length; edges.push({ u: E.u, v: E.v, b: E.b, len: E.len, dup: true }); adj[E.u].push(ne); adj[E.v].push(ne);
+        stats.retraceMM += E.len / PX; n = w;
+      }
+    });
+    // what's still odd is joined by virtual edges (jumps), nearest first, so every network has an Euler circuit
+    var still = []; adj.forEach(function (l, n) { if (l.length % 2) still.push(n); });
+    var usedS = new Uint8Array(cl.length);
+    still.forEach(function (a) {
+      if (usedS[a]) return; usedS[a] = 1;
+      var best = -1, bd = Infinity;
+      still.forEach(function (b) { if (usedS[b]) return; var dd = Math.hypot(cl[a].x - cl[b].x, cl[a].y - cl[b].y); if (dd < bd) { bd = dd; best = b; } });
+      if (best < 0) return; usedS[best] = 1;
+      var ne = edges.length; edges.push({ u: a, v: best, b: -1, virtual: true }); adj[a].push(ne); adj[best].push(ne);
+    });
+    var used = new Uint8Array(edges.length), ptr = new Int32Array(cl.length);
+    for (var sN = 0; sN < cl.length; sN++) {
+      if (ptr[sN] >= adj[sN].length) continue;
+      var stack = [{ n: sN, e: -1 }], circ = [];
+      while (stack.length) {
+        var top2 = stack[stack.length - 1], n2 = top2.n;
+        while (ptr[n2] < adj[n2].length && used[adj[n2][ptr[n2]]]) ptr[n2]++;
+        if (ptr[n2] < adj[n2].length) { var e2 = adj[n2][ptr[n2]]; used[e2] = 1; var E2 = edges[e2]; stack.push({ n: E2.u === n2 ? E2.v : E2.u, e: e2 }); }
+        else circ.push(stack.pop());
+      }
+      circ.reverse(); // node sequence; circ[k].e = edge taken from circ[k-1] to circ[k]
+      var steps = [];
+      for (var k8 = 1; k8 < circ.length; k8++) steps.push({ from: circ[k8 - 1].n, to: circ[k8].n, e: circ[k8].e });
+      var vk = -1; for (var k9 = 0; k9 < steps.length; k9++) if (edges[steps[k9].e].virtual) { vk = k9; break; }
+      if (vk >= 0) steps = steps.slice(vk + 1).concat(steps.slice(0, vk + 1));
+      var cur = [];
+      steps.forEach(function (stp) {
+        var E3 = edges[stp.e];
+        if (E3.virtual) { if (cur.length) trails.push(cur); cur = []; return; }
+        cur.push({ b: E3.b, rev: br[E3.b].a !== stp.from });
+      });
+      if (cur.length) trails.push(cur);
+    }
+    var lines = [], firstPass = new Uint8Array(br.length);
+    var minTrail = spec.minRunMM === undefined ? 1.2 : spec.minRunMM;
+    trails.forEach(function (tr) {
+      var any = false, tl = 0;
+      tr.forEach(function (seg) { tl += br[seg.b].len / PX; });
+      if (tl < minTrail) { stats.dropped = (stats.dropped || 0) + 1; return; } // a tick shorter than two stitches isn't worth a jump
+      tr.forEach(function (seg) {
+        var b = br[seg.b], pts = seg.rev ? b.mm.slice().reverse() : b.mm, triple = b.bold && !firstPass[seg.b];
+        firstPass[seg.b] = 1;
+        for (var k = 1; k < pts.length; k++) {
+          var a = pts[k - 1], c = pts[k], L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+          if (L < 1e-6) continue;
+          lines.push([a[0], a[1], c[0], c[1], 6, -1, 0, gid]);
+          if (triple) { lines.push([c[0], c[1], a[0], a[1], 6, -1, 0, gid], [a[0], a[1], c[0], c[1], 6, -1, 0, gid]); stats.beanMM += L; }
+          stats.runMM += L; any = true;
+        }
+      });
+      if (any) { gid++; stats.lines++; }
+    });
+    // the ink box and stitch coverage (for travel routing) include every kind of mark
+    var all = newMask();
+    for (var i10 = 0; i10 < N; i10++) if (ink[i10] || mass[i10]) all[i10] = 1;
+    if (spec.debugLine) LASTLINE = { W: W, H: H, ink: ink, mass: mass, cls: cls, line: lineMask, br: br };
+    return { colour: inkColour, ink: all, solid: nSolid > 60 ? solid : null, hatch: hatch, hatchMask: hatchMask, lines: lines, stats: stats };
   }
 
   // ---------- one layer ----------
@@ -2309,7 +2699,7 @@ var StitchEngine = (function () {
     var shd = fx.shadow && fx.shadow.on ? fx.shadow : null;
     var shDX = shd ? (shd.dx === undefined ? 1.2 : shd.dx) : 0, shDY = shd ? (shd.dy === undefined ? -1.2 : shd.dy) : 0;
     var marginMM = s1 + s2 + Math.max(Math.abs(shDX), Math.abs(shDY)) + 4;
-    var colours = [], meta = {};
+    var colours = [], meta = {}, la = null;
 
     if (spec.kind === 'text') {
       var extra = 2 * (s1 + s2) + Math.abs(shDX);
@@ -2335,14 +2725,24 @@ var StitchEngine = (function () {
         }
       }
       colours.push({ role: 'fill', color: (spec.colors && spec.colors.fill) || '#b3202f', mask: mask });
+    } else if (spec.lineArt) {
+      la = lineArt(cc, spec, marginMM);
+      if (spec.recolor && spec.recolor[0]) la.colour = spec.recolor[0];
+      if (la.solid) colours.push({ role: 'colour', color: la.colour, mask: la.solid });
+      meta.lineArt = la.stats; meta.painting = false;
     } else {
       var rc = rasterColours(cc, spec, marginMM);
       colours = rc.colours;
       meta.bgRemoved = rc.bgRemoved; meta.painting = !!rc.painting; meta.near = rc.near;
+      // line art hint: light paper, and most of the dark ink in strokes thinner than a fill can show (under ~0.9 mm)
+      if (rc.ink) {
+        meta.thinInk = +rc.ink.thin.toFixed(3); meta.inkShare = +rc.ink.share.toFixed(3);
+        meta.lineHint = rc.ink.paper > 170 && rc.ink.thin > 0.6 && rc.ink.share > 0.004 && rc.ink.share < 0.6 && (rc.painting ? rc.ink.sat < 40 && rc.ink.chroma < 30 : colours.length <= 4 || rc.ink.chroma < 30);
+      }
       if (spec.recolor) colours.forEach(function (c4, i4) { if (spec.recolor[i4]) c4.color = spec.recolor[i4]; });
     }
 
-    var S = unionMasks(colours.map(function (c5) { return c5.mask; }));
+    var S = la ? la.ink : unionMasks(colours.map(function (c5) { return c5.mask; }));
     // each colour reaches 0.4 mm under the colours sewn after it, so they don't gap apart
     for (var ci = 0; ci < colours.length - 1; ci++) {
       var later = unionMasks(colours.slice(ci + 1).map(function (c6) { return c6.mask; }));
@@ -2392,6 +2792,11 @@ var StitchEngine = (function () {
         return s1 ? 0.72 + 0.28 * Math.min(1, Math.max(0, (dmm - 0.3) / 1.6)) : 0.86 + 0.14 * Math.min(1, dmm / 1.2);
       });
     });
+    // line art: hatching, then the lines on top, in the same thread as any solid ink
+    if (la) {
+      if (la.hatch.length) parts.push({ role: 'colour', color: la.colour, kind: 'run', sub: 'hatch', chords: la.hatch, ao: function () { return 0.95; } });
+      if (la.lines.length) parts.push({ role: 'colour', color: la.colour, kind: 'run', sub: 'lines', chords: la.lines, ao: function () { return 1; } });
+    }
     // flag stripes: cut the text fill into bands; each band is its own thread, overlapping its neighbours slightly
     if (spec.kind === 'text' && spec.bands && spec.bands.n > 1) {
       var fi = -1;
@@ -2412,6 +2817,7 @@ var StitchEngine = (function () {
     var T = function (p) { return [p[0] - cx, cy - p[1]]; };
     var out = parts.map(function (p, pi) {
       var o = { role: p.role, color: p.color, kind: p.kind, index: pi };
+      if (p.sub) o.sub = p.sub;
       if (p.band !== undefined) o.band = p.band;
       o.chords = p.chords.map(function (c) {
         var mxm = (c[0] + c[2]) / 2, mym = (c[1] + c[3]) / 2;
@@ -2439,11 +2845,14 @@ var StitchEngine = (function () {
     }
     var cum = newMask(), grids = [];
     for (var pk = parts.length - 1; pk >= 0; pk--) {
-      var cv = coverageOf(parts[pk].chords);
-      for (var q9 = 0; q9 < W * H; q9++) if (cv[q9]) cum[q9] = 1;
+      // a running stitch is one thread wide: it hides nothing, so travel never counts on it
+      var cv = parts[pk].kind === 'run' ? null : coverageOf(parts[pk].chords);
+      if (cv) for (var q9 = 0; q9 < W * H; q9++) if (cv[q9]) cum[q9] = 1;
       grids[pk] = gridOf(cum);
     }
     var grid = grids.length ? grids[0] : gridOf(S2);
+    // hatching may travel inside its own shaded areas (a stray line there reads as one more hatch stroke)
+    if (la && la.hatch.length) grids = grids.map(function (g0, k) { return parts[k].sub === 'hatch' ? gridOf(dilateMask(la.hatchMask, 2)) : g0; });
     out.forEach(function (o, k) { o.inside = { res: res, x0: -cx, y1: cy, w: gw, h: gh, data: grids[k] }; });
     var stitchCount = out.reduce(function (a, p) { return a + p.chords.length; }, 0);
     var dbg = spec.debugMask ? { W: W, H: H, PX: PX, cx: cx, cy: cy, mask: Uint8Array.from(colours[0].mask), stats: LAST,
@@ -2461,6 +2870,6 @@ var StitchEngine = (function () {
       ms: Date.now() - t0
     };
   }
-  return { renderLayer: renderLayer, parseSvgPalette: parseSvgPalette, nearestThread: nearestThread, nearestInChart: nearestInChart, THREADS: THREADS, PX: PX };
+  return { lastLine: function () { return LASTLINE; }, renderLayer: renderLayer, parseSvgPalette: parseSvgPalette, nearestThread: nearestThread, nearestInChart: nearestInChart, THREADS: THREADS, PX: PX };
 })();
 if (typeof module !== 'undefined') module.exports = StitchEngine;

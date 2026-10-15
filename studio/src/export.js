@@ -106,8 +106,8 @@ var StitchExport = (function () {
     }
     function cellWorld(k) { return xf.fwd([g.x0 + (k % W + 0.5) * g.res, g.y1 - (Math.floor(k / W) + 0.5) * g.res]); }
     return {
-      route: function (a, b) {
-        if (dist(a, b) > 160) return null; // long runs are fine: they only cross ground that will be sewn over
+      route: function (a, b, maxD) {
+        if (dist(a, b) > (maxD || 160)) return null; // long runs are fine: they only cross ground that will be sewn over
         if (lineIn(a, b)) return [b];
         var ca = nearestCell(a), cb = nearestCell(b);
         if (ca === null || cb === null) return null;
@@ -170,8 +170,8 @@ var StitchExport = (function () {
   Seq.prototype.moveTo = function (p, next) {
     if (!this.last) { this.add('J', p); this.last = p; this.stitch(p, true); this.lock(p, next); return; }
     var d = dist(p, this.last);
-    if (d <= TRAVEL) { this.stitch(p); return; }
-    var route = this.router ? this.router.route(this.last, p) : null;
+    if (d <= (this.travelMax != null ? this.travelMax : TRAVEL)) { this.stitch(p); return; }
+    var route = this.router ? this.router.route(this.last, p, this.routeMax) : null;
     if (route) {
       var self = this;
       route.forEach(function (tgt) {
@@ -302,6 +302,51 @@ var StitchExport = (function () {
     });
     return out;
   }
+  // chords that follow on exactly (line art keeps its runs apart: a gap means lift, not a stitch across the paper)
+  function exactRuns(chords) {
+    var runs = [], run = [];
+    chords.forEach(function (c) {
+      var a = [c[0], c[1]], b = [c[2], c[3]];
+      if (run.length && dist(a, run[run.length - 1]) <= 0.02) run.push(b);
+      else { if (run.length > 1) runs.push(run); run = [a, b]; }
+    });
+    if (run.length > 1) runs.push(run);
+    return runs;
+  }
+  // many short runs (an engraving has thousands): nearest next run, going left penalised, found through a grid
+  function greedyRuns(items, from) {
+    var CELL = 5, grid = new Map(), out = [], left = items.length;
+    function key(i, j) { return i * 100003 + j; }
+    items.forEach(function (it, n) {
+      it.n = n;
+      [0, 1].forEach(function (end) {
+        var e = it.ends[end], k = key(Math.floor(e[0] / CELL), Math.floor(e[1] / CELL));
+        if (!grid.has(k)) grid.set(k, []); grid.get(k).push([n, end]);
+      });
+    });
+    var used = new Uint8Array(items.length), pos = from;
+    if (!pos) { var mx = Infinity; items.forEach(function (it) { [0, 1].forEach(function (e) { if (it.ends[e][0] < mx) { mx = it.ends[e][0]; pos = [it.ends[e][0] - 1, it.ends[e][1]]; } }); }); }
+    while (left) {
+      var ci = Math.floor(pos[0] / CELL), cj = Math.floor(pos[1] / CELL), best = null;
+      for (var r = 0; r < 400; r++) {
+        if (best && (r - 1) * CELL > best.cost) break;
+        for (var di = -r; di <= r; di++) for (var dj = -r; dj <= r; dj++) {
+          if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+          var list = grid.get(key(ci + di, cj + dj)); if (!list) continue;
+          for (var q = 0; q < list.length; q++) {
+            var n = list[q][0], end = list[q][1]; if (used[n]) continue;
+            var e = items[n].ends[end], cost = dist(pos, e) + 1.5 * Math.max(0, pos[0] - e[0]);
+            if (!best || cost < best.cost) best = { n: n, rev: end === 1, cost: cost };
+          }
+        }
+      }
+      if (!best) { for (var z = 0; z < items.length; z++) if (!used[z]) { best = { n: z, rev: false }; break; } }
+      used[best.n] = 1; left--;
+      out.push({ item: items[best.n], rev: best.rev });
+      pos = items[best.n].ends[best.rev ? 0 : 1];
+    }
+    return out;
+  }
   function reverseChords(cs) { return cs.slice().reverse().map(function (c) { var d = c.slice(); d[0] = c[2]; d[1] = c[3]; d[2] = c[0]; d[3] = c[1]; return d; }); }
   function buildSequence(placed, opts) {
     opts = opts || {};
@@ -338,6 +383,15 @@ var StitchExport = (function () {
             seq.path(resample(lp.under, 2.0, true).map(W));
             seq.path(lp.pen.map(W));
           });
+        } else if (part.kind === 'run') {
+          // line art and hatching: every group is one unbroken run, already in sewing order; runs are joined by a
+          // stitch only when they nearly touch, otherwise by a hidden route or a jump, never a line across the paper
+          var rg = fillGroups(part, W); rg.forEach(function (g) { g.reversible = true; });
+          seq.travelMax = 0.8; seq.routeMax = 5; if (part.sub !== 'hatch') seq.router = null;
+          (rg.length > 60 ? greedyRuns(rg, seq.last) : sweepOrder(rg, seq.last)).forEach(function (o) {
+            exactRuns(o.rev ? reverseChords(o.item.chords) : o.item.chords).forEach(function (r) { seq.path(r.map(W)); });
+          });
+          seq.travelMax = null; seq.routeMax = null;
         } else {
           // island by island, left to right across the hoop: each island's underlay, then its top stitching.
           // The needle only moves on to the right within a colour and comes back left at the colour change.

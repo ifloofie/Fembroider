@@ -200,6 +200,29 @@ async def main(flows):
             await pg.screenshot(path=os.path.join(OUT, '05_import.png'))
             print('import', await pg.evaluate("JSON.stringify(__studio.rt(__studio.doc.sel).result.parts.map(p => p.role + ' ' + p.color + ' ' + p.chords.length))"))
 
+        if 'lineart' in flows:
+            img = os.environ.get('LINEIMG', os.path.join(ROOT, 'test', 'line_images', 'line-cat.svg'))
+            await pg.set_input_files('#fileInput', img)
+            await settle(pg); await pg.wait_for_timeout(600)
+            await pg.screenshot(path=os.path.join(OUT, '20_line_before.png'))
+            print('hint', await pg.evaluate("JSON.stringify(__studio.rt(__studio.doc.sel).result.meta)"), await pg.locator('.note.suggest').count())
+            if await pg.locator('.note.suggest button').count():
+                await pg.click('.note.suggest button')
+            else:
+                await pg.click('[data-set="L.p.art"][data-v="line"]')
+            await pg.wait_for_timeout(800); await settle(pg)
+            await pg.screenshot(path=os.path.join(OUT, '21_line_after.png'))
+            await pg.click('.viewbar [data-view=top]'); await pg.wait_for_timeout(1200)
+            await pg.screenshot(path=os.path.join(OUT, '22_line_top.png'))
+            print('line', await pg.evaluate("JSON.stringify({meta: __studio.rt(__studio.doc.sel).result.meta.lineArt, parts: __studio.rt(__studio.doc.sel).result.parts.map(p => (p.sub || p.kind) + ' ' + p.color + ' ' + p.chords.length), st: __studio.seq().stats})"))
+            await pg.click('[data-set="L.p.lineWeight"][data-v="triple"]'); await pg.wait_for_timeout(800); await settle(pg)
+            print('triple', await pg.evaluate("JSON.stringify(__studio.seq().stats)"))
+            if os.environ.get('ZOOM'):
+                await pg.mouse.move(520, 420)
+                for _ in range(int(os.environ.get('ZOOM'))): await pg.mouse.wheel(0, -300); await pg.wait_for_timeout(120)
+                await pg.wait_for_timeout(1500)
+                await pg.screenshot(path=os.path.join(OUT, '23_line_zoom.png'))
+
         if 'all' in flows or 'transform' in flows:
             await pg.keyboard.press('Escape')
             await pg.click('#layerList .layer:last-child')  # bottom of list = first sewn = the text

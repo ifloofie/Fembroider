@@ -83,13 +83,13 @@ if (mode === 'fonts') {
   const list = all.slice(+(a0 || 0), a1 ? +a1 : undefined);
   for (const e of list) {
     const img = await loadImage(Buffer.from(svgAtSize(e.svg, 600)));
-    const spec = Object.assign({}, base, { kind: 'raster', source: img, sizeMM: 60, palette: E.parseSvgPalette(e.svg) });
+    const spec = Object.assign({}, base, { kind: 'raster', source: img, sizeMM: 60, palette: E.parseSvgPalette(e.svg), noHint: true });
     delete spec.effects;
     const res = run(e.code + ' ' + e.label, spec);
     emit(Object.assign(res.out || res, { group: e.group }));
   }
 } else if (mode === 'images') {
-  const dir = 'test/stress_images', files = fs.readdirSync(dir).filter(f => /\.(png|jpe?g|svg)$/i.test(f)).sort().slice(+(a0 || 0), a1 ? +a1 : undefined);
+  const dir = process.env.DIR || 'test/stress_images', files = fs.readdirSync(dir).filter(f => /\.(png|jpe?g|svg)$/i.test(f)).sort().filter(f => !process.env.ONLY || new RegExp(process.env.ONLY).test(f)).slice(+(a0 || 0), a1 ? +a1 : undefined);
   const SIZE = +(process.env.SIZE || 100), COLS = +(process.env.COLORS || 5);
   const keep = [];
   for (const f of files) {
@@ -99,6 +99,7 @@ if (mode === 'fonts') {
     catch (err) { emit({ item: f, error: 'load: ' + err.message }); continue; }
     const spec = Object.assign({}, base, { kind: 'raster', source: img, sizeMM: SIZE, maxColors: COLS, removeBg: true });
     delete spec.effects;
+    if (process.env.LINE) Object.assign(spec, { lineArt: true, lineWeight: process.env.WEIGHT || 'auto', shading: process.env.SHADE || 'hatch' });
     if (svg) { const pal = E.parseSvgPalette(buf.toString('utf8')); if (pal.length) { spec.palette = pal; delete spec.maxColors; } }
     const res = run(f, spec);
     emit(res.out || res);
@@ -110,9 +111,9 @@ if (mode === 'fonts') {
     const c = createCanvas(w, h), x = c.getContext('2d');
     x.fillStyle = '#efe7d6'; x.fillRect(0, 0, w, h); x.lineCap = 'round';
     X.drawPreview(k.seq, x, w, h, { margin: 20, background: '#efe7d6', lineWidth: 0.32 * S });
-    fs.writeFileSync(`${OUT}/img_${k.f.replace(/\.[^.]+$/, '')}_${SIZE}mm_${COLS}c.png`, c.toBuffer('image/png'));
+    fs.writeFileSync(`${OUT}/img_${k.f.replace(/\.[^.]+$/, '')}_${SIZE}mm_${COLS}c${process.env.LINE ? '_line' : ''}.png`, c.toBuffer('image/png'));
   }
 }
-const tag = `${mode}_${a0 || 0}_${a1 || 'end'}` + (mode === 'images' ? `_${process.env.SIZE || 100}mm_${process.env.COLORS || 5}c` : '');
+const tag = `${mode}_${a0 || 0}_${a1 || 'end'}` + (mode === 'images' ? `_${process.env.SIZE || 100}mm_${process.env.COLORS || 5}c` + (process.env.LINE ? '_line' : '') + (process.env.ONLY ? '_' + process.env.ONLY.replace(/\W/g, '') : '') : '');
 fs.writeFileSync(`${OUT}/${tag}.jsonl`, results.map(r => JSON.stringify(r)).join('\n') + '\n');
 console.log(tag, results.length, 'designs', results.filter(r => r.error).length, 'errors');

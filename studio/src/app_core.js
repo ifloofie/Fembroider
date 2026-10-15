@@ -168,7 +168,11 @@
     }
     if (L.type === 'image') { // saved before Smoothing / Artwork existed
       if (!(L.p.blur >= 0 && L.p.blur <= 1.5)) L.p.blur = 0.6;
-      if (['auto', 'flat', 'painting'].indexOf(L.p.art) < 0) L.p.art = 'auto';
+      if (['auto', 'flat', 'painting', 'line'].indexOf(L.p.art) < 0) L.p.art = 'auto';
+      if (['auto', 'single', 'triple'].indexOf(L.p.lineWeight) < 0) L.p.lineWeight = 'auto'; // saved before line art
+      if (['hatch', 'solid', 'none'].indexOf(L.p.shading) < 0) L.p.shading = 'hatch';
+      if (!(L.p.ink >= 0.2 && L.p.ink <= 0.7)) L.p.ink = 0.4;
+      if (!(L.p.runLen >= 1.5 && L.p.runLen <= 3.5)) L.p.runLen = 2;
     }
     return L;
   }
@@ -201,7 +205,7 @@
     var t = THEME[doc.theme] || A.themes[0];
     var fx = defaultFx(); fx.stroke.on = false;
     return { id: newId(), type: 'image', name: name, visible: true, locked: false, thread: 'auto', dirs: [],
-      tf: { x: 0, y: 0, rot: 0, mx: false, my: false }, p: { src: srcId, size: sizeMM, maxColors: 5, blur: 0.6, art: 'auto', removeBg: true, palette: 'svg' },
+      tf: { x: 0, y: 0, rot: 0, mx: false, my: false }, p: { src: srcId, size: sizeMM, maxColors: 5, blur: 0.6, art: 'auto', removeBg: true, palette: 'svg', lineWeight: 'auto', shading: 'hatch', ink: 0.4, runLen: 2 },
       colors: themeColors(t), fx: fx };
   }
 
@@ -251,7 +255,7 @@
     }
     if (L.type === 'emoji') {
       var e = EMOJI[L.p.code];
-      return Object.assign(base, { kind: 'raster', sizeMM: L.p.size, palette: E.parseSvgPalette(e.svg), srcKey: 'emoji:' + L.p.code });
+      return Object.assign(base, { kind: 'raster', sizeMM: L.p.size, palette: E.parseSvgPalette(e.svg), srcKey: 'emoji:' + L.p.code, noHint: true });
     }
     var src = SOURCES.get(L.p.src) || {};
     var o = Object.assign(base, { kind: 'raster', sizeMM: L.p.size, maxColors: L.p.maxColors, blurMM: L.p.blur === undefined ? 0.6 : L.p.blur, graphic: L.p.art === 'flat' ? true : L.p.art === 'painting' ? false : undefined, removeBg: !!L.p.removeBg, srcKey: 'src:' + L.p.src });
@@ -259,6 +263,11 @@
     if (src.kind === 'svg' && L.p.palette !== 'auto') {
       if (!src.palette) { try { src.palette = E.parseSvgPalette(src.svg); } catch (e) { src.palette = []; } }
       if (src.palette.length) { o.palette = src.palette; delete o.maxColors; }
+    }
+    // line art: one thread, the ink; thin lines become running stitch, fine shading hatching
+    if (L.p.art === 'line') {
+      delete o.maxColors; delete o.blurMM; delete o.graphic;
+      Object.assign(o, { lineArt: true, lineWeight: L.p.lineWeight || 'auto', shading: L.p.shading || 'hatch', inkLevel: L.p.ink || 0.4, runMM: L.p.runLen || 2 });
     }
     return o;
   }
