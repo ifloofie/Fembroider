@@ -8,7 +8,7 @@
 
 <p align="center"><a href="https://github.com/ifloofie/Fembroider/releases/latest"><b>⬇ Download for Windows</b></a></p>
 
-![Fembroider showing the word “Welcome” in red script with a rainbow underneath, stitched in a hoop on the 3D preview](docs/images/screenshot-light.jpg)
+![Fembroider in dark mode, showing the word “Welcome” in red script with a rainbow underneath, stitched in a hoop on the 3D preview](docs/images/screenshot.jpg)
 
 ## What it does
 
@@ -83,7 +83,7 @@ All the artworks shown are in the public domain.
 Fembroider does its best automatically, but you know your design better. **Click any shape** in the preview and a
 round menu opens where you clicked, with everything you can change about that part. Drag a shape to move it.
 
-<p align="center"><img src="docs/images/pie-menu.jpg" width="530" alt="Clicking the black outline of a strawberry sticker opens a round menu: Sew as, Direction, Colour, Sew order, Merge into, Leave out, Sticker edge and Layer"></p>
+![Three steps in dark mode: clicking the black outline of a strawberry sticker opens a round menu (Sew as, Direction, Colour, Sew order, Merge into, Leave out, Sticker edge, Layer); Sew as offers Auto, Satin, Flat fill, Lines and Outline; after choosing Lines the outline is a fine line](docs/images/pie-menu.jpg)
 
 - **Sew as…** Auto, Satin, Flat fill, *Lines* (thin strokes become a single or triple running stitch along their
   middle, great for the linework of a drawing) or *Outline* (just the edge).
@@ -121,9 +121,6 @@ Bisexual, Lesbian, Gay, Pansexual, Nonbinary, Asexual or Intersex), each in ligh
    company. Click **More info**, then **Run anyway**.
 3. In Fembroider, pick your **machine** at the top, then add **Text**, an **Emoji** or **Import** a picture.
 4. When you're happy with the 3D preview, go to **Export** and save the file onto your machine's USB stick or card.
-
-Already using Stitch Studio? Fembroider is its new name, and it picks up your Stitch Studio settings and last
-design automatically.
 
 ## Questions
 

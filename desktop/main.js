@@ -1,5 +1,5 @@
 'use strict';
-// Fembroider desktop shell (formerly Stitch Studio).
+// Fembroider desktop shell.
 // Deliberately minimal: one sandboxed window showing local files. No Node access in the page,
 // no network, no permissions, no auto-updater, no child processes, no registry writes.
 // Files are written only where the user picks in a Save or folder dialog (a project, once saved, is re-saved to the
@@ -17,10 +17,9 @@ const KIND = { zip: 'ZIP archive', png: 'PNG image', txt: 'Text', exp: 'Melco/Be
 const PROJECT_EXT = 'fembroider';
 const PROJECT_MAX = 400 * 1024 * 1024;
 
-// Renamed from Stitch Studio: keep using the old profile (saved preferences, autosaves) if there is one.
+// the profile (saved preferences, autosaves) lives in %APPDATA%\Fembroider
 try {
-  const appData = app.getPath('appData'), now = path.join(appData, 'Fembroider'), was = path.join(appData, 'Stitch Studio');
-  if (!fs.existsSync(now) && fs.existsSync(was)) fs.cpSync(was, now, { recursive: true, filter: (src) => !/[\\/](Singleton\w*|lockfile)$/i.test(src) });
+  const now = path.join(app.getPath('appData'), 'Fembroider');
   app.setName('Fembroider');
   app.setPath('userData', now);
 } catch (err) { /* start with a fresh profile */ }
@@ -232,7 +231,7 @@ if (!app.requestSingleInstanceLock()) {
     app.setAboutPanelOptions({
       applicationName: 'Fembroider',
       applicationVersion: app.getVersion(),
-      credits: 'Embroidery digitizer and 3D stitch preview (formerly Stitch Studio). ' +
+      credits: 'Embroidery digitizer and 3D stitch preview ' +
         'Fonts: 50 open-source design fonts via Fontsource: Yellowtail, Satisfy, Rochester, Ultra and Permanent Marker (Apache 2.0); the rest, plus Saira Extra Condensed and IBM Plex, under the SIL OFL 1.1. ' +
         'Emoji: Twemoji 17 by Twitter, Inc. and contributors (CC-BY 4.0); names and groups from emojibase (MIT). Thread charts: Ink/Stitch palettes (GPL-3.0). 3D: three.js (MIT).'
     });
