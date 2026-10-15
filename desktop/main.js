@@ -233,7 +233,7 @@ if (!app.requestSingleInstanceLock()) {
       applicationVersion: app.getVersion(),
       credits: 'Embroidery digitizer and 3D stitch preview ' +
         'Fonts: 50 open-source design fonts via Fontsource: Yellowtail, Satisfy, Rochester, Ultra and Permanent Marker (Apache 2.0); the rest, plus Saira Extra Condensed and IBM Plex, under the SIL OFL 1.1. ' +
-        'Emoji: Twemoji 17 by Twitter, Inc. and contributors (CC-BY 4.0); names and groups from emojibase (MIT). Thread charts: Ink/Stitch palettes (GPL-3.0). 3D: three.js (MIT).'
+        'Emoji: Twemoji 17 by Twitter, Inc. and contributors (CC-BY 4.0); names and groups from emojibase (MIT). Thread charts: Ink/Stitch palettes (GPL-3.0). Embroidery file readers ported from pyembroidery (MIT). 3D: three.js (MIT).'
     });
 
     createWindow();

@@ -95,22 +95,26 @@
       return { title: gname, sub: L.name + ' · left out', swatch: ghostColour(L, t.ghost), items: [
         { label: 'Sew it', icon: 'sew', run: function () { setStitch(L, t.key, 'auto', gname + ' is sewn again'); } },
         { label: 'Sew as…', icon: 'stitch', ring: stitchRing },
-        { label: 'Layer', icon: 'layer', ring: function () { return layerRing(false); } }] };
+        { label: 'Layer', icon: 'layer', ring: function () { return layerRing(false); } }].filter(function (it) { return !(it.ring === stitchRing && (L.type === 'stitches' || (L.type === 'image' && L.p.art === 'line'))); }) };
     }
-    var p = t.part, key = t.key, how = stitchOfKey(L, key), lineArt = L.type === 'image' && L.p.art === 'line';
+    var p = t.part, key = t.key, how = stitchOfKey(L, key), lineArt = (L.type === 'image' && L.p.art === 'line') || L.type === 'stitches';
     var slot = colourSlot(L, p), name = threadFor(partColor(L, p)).name;
     var isEdge = key === 'stroke' || key === 'stroke2' || key === 'shadow';
     if (L.type === 'text' && !isEdge) items.push({ label: 'Edit text', icon: 'text', run: editText });
     if (!lineArt) items.push({ label: 'Sew as…', icon: 'stitch', note: STITCH_NAME[how], ring: stitchRing });
-    if (p.kind === 'fill' && !isEdge && (how === 'auto' || how === 'fill' || how === 'satin')) items.push({ label: 'Direction…', icon: 'dir', ring: dirRing });
+    if (p.kind === 'fill' && L.type !== 'stitches' && !isEdge && (how === 'auto' || how === 'fill' || how === 'satin')) items.push({ label: 'Direction…', icon: 'dir', ring: dirRing });
     if (slot) items.push({ label: 'Colour', icon: 'colour', run: function (btn) { recolourArea(L, p, slot); } });
     if (!isEdge && sewKeys(L).length > 1) items.push({ label: 'Sew order…', icon: 'order', ring: orderRing });
     if (p.role === 'colour' && !lineArt && sewKeys(L).filter(function (k) { return /^colour:/.test(k) && k !== key; }).length) items.push({ label: 'Merge into…', icon: 'merge', ring: mergeRing });
     if (!isEdge) items.push({ label: 'Leave out', icon: 'skip', run: function () { setStitch(L, key, 'skip', name + ' left out · click its outline to bring it back'); } });
     if (key === 'stroke') items.push({ label: 'Remove edge', icon: 'edge', run: function () { L.fx.stroke.on = false; requestRender(L); renderPanel(); commit(); toast('Edge removed'); } });
-    else if (L.type !== 'text' || !L.fx.stroke.on) items.push(edgeItem(L));
+    else if (L.type !== 'stitches' && (L.type !== 'text' || !L.fx.stroke.on)) items.push(edgeItem(L));
     items.push({ label: 'Layer', icon: 'layer', ring: function () { return layerRing(false); } });
     var a = p.kind === 'fill' ? angleNear(p, pie.lp) : null;
+    if (L.type === 'stitches') {
+      var ks0 = sewKeys(L), fname = p.fileThread && p.fileThread.name && !Object.keys(L.colors.recolor || {}).length ? p.fileThread.name : name;
+      return { title: fname, sub: L.name + ' · colour ' + (ks0.indexOf(key) + 1) + ' of ' + ks0.length, swatch: slot ? slot.cur : partColor(L, p), items: items };
+    }
     return { title: name, sub: (isEdge ? (key === 'stroke' ? 'Edge' : key === 'stroke2' ? 'Second edge' : 'Shadow') : L.name) + ' · ' + (isEdge && how === 'auto' ? 'Satin' : isEdge && how === 'line' ? 'Bean line' : STITCH_NAME[how]) + (a !== null && how !== 'line' && how !== 'outline' ? ' · ' + a + '°' : ''), swatch: slot ? slot.cur : partColor(L, p), items: items };
   }
   function edgeItem(L) {
@@ -173,7 +177,7 @@
   function layerRing(top) {
     var L = pie.L, idx = doc.layers.indexOf(L), items = [];
     if (top && L.type === 'text') items.push({ label: 'Edit text', icon: 'text', run: editText });
-    if (top) items.push(edgeItem(L));
+    if (top && L.type !== 'stitches') items.push(edgeItem(L));
     items.push({ label: 'Duplicate', icon: 'copy', run: function () { duplicateLayer(); } });
     items.push({ label: 'Mirror', icon: 'mirror', on: !!L.tf.mx, run: function () { L.tf.mx = !L.tf.mx; placeLayer(L); sceneChanged(); refreshToolPanel(); commit(); } });
     if (doc.layers.length > 1) {

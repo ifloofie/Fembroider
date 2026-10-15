@@ -16,9 +16,10 @@ design and every imported picture); autosave and version history live in Indexed
       src/engine.js          masks → islands → tatami / satin / outline chords, underlay, swoops, travel grids
                              line art: ink vs. paper, skeleton → Euler-routed running stitch, tone → hatching
                              per-area edits (spec.edits / order / merge): Lines, Outline, Satin, Flat fill, Skip
+      src/readers.js         DST / EXP (+INF) / JEF / PES / PEC / VP3 / XXX / HUS readers and a zip reader (ported from pyembroidery, MIT)
       src/export.js          sewing order (left-to-right sweep), travel routing, EXP / INF / JEF / DST / PES / VP3 / XXX / BMP writers, zip
       src/machines.js        machine catalogue: models, hoops, file format, trimming, speed (searchable from the top bar)
-      src/app_*.js           UI: core state + palettes, threads, 3D scene, direction tool, tips, panels, pie menu, export & bake,
+      src/app_*.js           UI: core state + palettes, threads, 3D scene, direction tool, tips, panels, pie menu, stitch files, export & bake,
                              projects (save / open / autosave / versions), boot
       src/index.html         page template and CSS
       src/assets.gen.js      generated: fonts, themes, thread charts, packed emoji (from build_assets.py)
@@ -67,17 +68,21 @@ the repository itself).
     node test/trace_jumps.mjs <emoji code | font:Family:Text | img:path>   # every jump of one design, for debugging
     node test/t_lineart.mjs <image> [sizeMM] [crop] [key=value]       # line-art mode: metrics + source | stitches picture
     LINE=1 DIR=test/line_images node test/stress.mjs images           # line-art sweep (synthetic drawings are in the repo)
+    node test/t_read.mjs <dir>...                             # every embroidery file in the folders: stitches, colours, extent (JSON lines)
+    node test/t_open.mjs <file>...                           # opened file -> sewing plan -> our DST/EXP/PES/JEF writers -> read back: every stitch kept
     node test/t_edits.mjs <image> [sizeMM]                     # per-area edits (Lines, Outline, skip, order, edge, merge) side by side
 
 The image sweep reads test/stress_images/ (not in the repo: add your own public-domain paintings and clipart).
     node test/quality.mjs         # stitch-quality harness (coverage, show-through, crossings, edge angles)
     python3 test/ui.py            # headless browser run of the whole app (needs Playwright + Chromium)
+    python3 test/ui_open.py       # opening a zip of designs, the stitch-file layer, export (needs a zip in test/emb_files/, not in the repo)
     python3 test/ui_pie.py        # the click-a-shape pie menu, on test/stickers/sticker-strawberry.png
 
 ## Third-party material
 
 - Fonts: Fontsource packages, SIL OFL 1.1 (Yellowtail, Satisfy, Rochester, Ultra, Permanent Marker: Apache 2.0).
 - Emoji: Twemoji 17 © Twitter, Inc. and contributors, CC-BY 4.0; names and groups from emojibase (MIT).
+- Embroidery file readers: ported from pyembroidery by EmbroidePy (MIT). Test files: EmbroidePy/samples (MIT).
 - Thread charts: Ink/Stitch palettes, GPL-3.0 (copies and licence in studio/vendor/inkstitch-palettes).
   Brand names are trademarks of their owners.
 - 3D: three.js r128 (MIT). Desktop: Electron (MIT).

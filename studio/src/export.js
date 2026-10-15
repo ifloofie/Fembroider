@@ -190,7 +190,20 @@ var StitchExport = (function () {
     for (var i = 1; i < pts.length; i++) { this.prevDir = this.last; this.stitch(pts[i]); }
     this.prevDir = pts.length > 1 ? pts[pts.length - 2] : pts[0];
   };
-  Seq.prototype.endBlock = function () { if (this.last) this.lock(this.last, this.prevDir || this.last); };
+  Seq.prototype.endBlock = function () { if (this.last && !this.rawEnd) this.lock(this.last, this.prevDir || this.last); };
+  // a run from an opened stitch file, sewn exactly: no locks added (the file has its own tie-ins and tie-offs), no
+  // stitches dropped; only a stitch longer than a machine can make in one step (12 mm) is split
+  Seq.prototype.raw = function (pts) {
+    if (!pts.length) return;
+    var p0 = pts[0];
+    if (!this.last || dist(this.last, p0) > 0.05) { this.add('J', p0); this.last = p0; this.add('S', p0); }
+    for (var i = 1; i < pts.length; i++) {
+      var a = this.last, p = pts[i], d = dist(a, p);
+      if (d > 12) { var n = Math.ceil(d / 12); for (var k = 1; k < n; k++) this.add('S', [a[0] + (p[0] - a[0]) * k / n, a[1] + (p[1] - a[1]) * k / n]); }
+      this.add('S', p); this.last = p;
+    }
+    this.prevDir = pts.length > 1 ? pts[pts.length - 2] : null;
+  };
 
   // placed: [{ result, transform, name }] in sewing order (first sews first)
   // split a fill part into its islands (chord[7], tagged by the engine), each with the underlay runs that lie in
@@ -357,7 +370,7 @@ var StitchExport = (function () {
       var xf = makeXform(L.transform || {});
       var W = function (p) { return xf.fwd(p); };
       L.result.parts.forEach(function (part) {
-        if (!part.chords.length && !(part.loops && part.loops.length)) return;
+        if (!part.chords.length && !(part.loops && part.loops.length) && !(part.runs && part.runs.length)) return;
         if (part.color !== curColor) {
           if (curColor !== null) { seq.endBlock(); seq.add('C', seq.last || [0, 0]); seq.n.colors++; seq.last = null; }
           curColor = part.color;
@@ -366,8 +379,12 @@ var StitchExport = (function () {
           blocks.push(block);
         }
         if (block.layers.indexOf(L.name) < 0) block.layers.push(L.name);
-        seq.router = Router(part.inside || L.result.inside, xf);
-        if (part.kind === 'outline') {
+        var grid0 = part.inside || L.result.inside;
+        seq.router = grid0 ? Router(grid0, xf) : null;
+        seq.rawEnd = part.kind === 'stitches';
+        if (part.kind === 'stitches') {
+          part.runs.forEach(function (r) { seq.raw(r.map(W)); });
+        } else if (part.kind === 'outline') {
           // outlines letter by letter from left to right across the hoop
           // closed loops can start anywhere: each starts (and so ends) at its point nearest the needle
           sweepOrder((part.loops || []).filter(function (lp) { return lp.pen.length > 2; }).map(function (lp) {
@@ -638,9 +655,22 @@ var StitchExport = (function () {
     var rm = Math.round((a[0] + b[0]) / 2), r = a[0] - b[0], g = a[1] - b[1], bl = a[2] - b[2];
     return (((512 + rm) * r * r) >> 8) + 4 * g * g + (((767 - rm) * bl * bl) >> 8);
   }
+  // perceptual colour distance (CIE76 in Lab): a near-black purple goes to Black, not to a dark olive that happens to
+  // be closer in RGB
+  var LABC = {};
+  function lab(c) {
+    var k = c[0] + ',' + c[1] + ',' + c[2]; if (LABC[k]) return LABC[k];
+    var f = function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var r = f(c[0]), g = f(c[1]), bl = f(c[2]);
+    var x = (0.4124 * r + 0.3576 * g + 0.1805 * bl) / 0.95047, y = 0.2126 * r + 0.7152 * g + 0.0722 * bl, z = (0.0193 * r + 0.1192 * g + 0.9505 * bl) / 1.08883;
+    var h = function (t) { return t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116; };
+    var fx = h(x), fy = h(y), fz = h(z);
+    return (LABC[k] = [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)]);
+  }
+  function dE(a, b) { var A = lab(a), B = lab(b); return (A[0] - B[0]) * (A[0] - B[0]) + (A[1] - B[1]) * (A[1] - B[1]) + (A[2] - B[2]) * (A[2] - B[2]); }
   function nearestIn(rgb, list) {
     var best = null, bd = Infinity;
-    list.forEach(function (c, i) { if (!c) return; var d = redMean(rgb, c); if (d <= bd) { bd = d; best = i; } });
+    list.forEach(function (c, i) { if (!c) return; var d = dE(rgb, c); if (d <= bd) { bd = d; best = i; } });
     return best;
   }
   // each distinct thread colour takes its own nearest palette entry, so two close colours stay distinct on screen
@@ -649,7 +679,7 @@ var StitchExport = (function () {
     seq.threads.forEach(function (t) { if (uniq.indexOf(t.color) < 0) uniq.push(t.color); });
     // closest pairs choose first, so a near-exact match is never taken by a colour that only loosely resembles it
     var pairs = [];
-    uniq.forEach(function (hex, u) { pal.forEach(function (c, i) { if (c) pairs.push([redMean(rgbOf(hex), c), u, i]); }); });
+    uniq.forEach(function (hex, u) { pal.forEach(function (c, i) { if (c) pairs.push([dE(rgbOf(hex), c), u, i]); }); });
     pairs.sort(function (a, b) { return a[0] - b[0]; });
     var done = {};
     pairs.forEach(function (p) { if (done[p[1]] || !pal[p[2]]) return; done[p[1]] = true; pal[p[2]] = null; chart[p[2]] = rgbOf(uniq[p[1]]); });

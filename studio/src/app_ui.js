@@ -261,7 +261,7 @@
   }
   function layersHtml() {
     var add = '<div class="addrow"><button type="button" class="btn" data-act="add-text">' + ic('text') + 'Text</button><button type="button" class="btn" data-act="add-emoji">' + ic('emoji') + 'Emoji</button><button type="button" class="btn" data-act="add-image">' + ic('image') + 'Import</button></div>';
-    if (!doc.layers.length) return add + '<p class="note">No layers yet. Add some text or an emoji, or import an SVG or picture — you can also drop a file anywhere on the plate.</p>';
+    if (!doc.layers.length) return add + '<p class="note">No layers yet. Add some text or an emoji, or import a picture or an embroidery file (PES, DST, EXP, JEF, VP3…). You can also drop a file anywhere on the plate.</p>';
     var L = selLayer(), idx = L ? doc.layers.indexOf(L) : -1;
     return add + '<ul class="layers" id="layerList" role="listbox" aria-label="Layers, top first">' + doc.layers.slice().reverse().map(layerRowHtml).join('') + '</ul>' +
       '<div class="btnrow four">' +
@@ -322,6 +322,7 @@
   }
   function selectedHtml(L) {
     if (!L) return '';
+    if (L.type === 'stitches') return stitchFileHtml(L);
     var locked = L.locked ? '<p class="note warn">This layer is locked. Unlock it in the list to edit it.</p>' : '';
     if (L.type === 'text') {
       var f = FONT[L.p.font] || A.fonts[0], sample = (L.p.text || 'Text').slice(0, 12);
@@ -536,7 +537,7 @@
   function designHtml() {
     var L = selLayer();
     return sec('layers', 'layers', 'Layers', doc.layers.length ? String(doc.layers.length) : '', layersHtml()) +
-      selectedHtml(L) + effectsHtml(L) + themesHtml() + hoopHtml();
+      selectedHtml(L) + (L && L.type === 'stitches' ? '' : effectsHtml(L)) + themesHtml() + hoopHtml();
   }
 
   // ---------- STITCH stage ----------
@@ -787,6 +788,7 @@
   function scaleLayerBy(L, f) {
     var r = rt(L.id); if (!r.result || L.locked) return;
     if (L.type === 'text') L.p.width = Math.round(Math.max(20, Math.min(190, r.result.size.w * f)));
+    else if (L.type === 'stitches') scaleStitchLayer(L, f);
     else L.p.size = Math.round(Math.max(10, Math.min(200, L.p.size * f)) * 2) / 2;
     r.preview = f;
     requestRender(L);
@@ -1100,9 +1102,10 @@
   }
   function importFile(file) {
     if (!file) return;
+    if (isStitchFile(file.name)) { importStitchFiles([file]); return; }
     var isSvg = /svg/i.test(file.type) || /\.svg$/i.test(file.name), name = (file.name || 'Image').replace(/\.[^.]+$/, '') || 'Image';
     if (file.size > 40e6) { toast('That file is too large (over 40 MB).'); return; }
-    if (!isSvg && !/^image\//.test(file.type)) { toast('Import an SVG, PNG, JPEG, WebP, GIF or BMP file.'); return; }
+    if (!isSvg && !/^image\//.test(file.type)) { toast('Import a picture (SVG, PNG, JPEG, WebP, GIF, BMP) or an embroidery file (PES, DST, EXP, JEF, VP3, HUS, XXX, PEC, or a zip of them).'); return; }
     var id = 'S' + newId();
     if (isSvg) {
       file.text().then(function (svg) {
@@ -1159,6 +1162,8 @@
       });
       return;
     }
+    var bs = t.closest('[data-block-skip]');
+    if (bs) { var Lb = selLayer(); if (Lb && !Lb.locked) setStitch(Lb, bs.dataset.blockSkip, stitchOfKey(Lb, bs.dataset.blockSkip) === 'skip' ? 'auto' : 'skip'); return; }
     var dd = t.closest('[data-dir-del]');
     if (dd) { var Ld = selLayer(); Ld.dirs.splice(+dd.dataset.dirDel, 1); requestRender(Ld); commit(); buildGizmo(); refreshToolPanel(); return; }
     var rot = t.closest('[data-rot]');
@@ -1355,7 +1360,13 @@
     ui.playing = !ui.playing; refreshPlay(); applySew();
   });
   $('sewSlider').addEventListener('input', function () { ui.playing = false; refreshPlay(); ui.sew = $('sewSlider').value / 1000; applySew(); });
-  $('fileInput').addEventListener('change', function () { var f = $('fileInput').files[0]; $('fileInput').value = ''; importFile(f); });
+  $('fileInput').addEventListener('change', function () { var fs = Array.prototype.slice.call($('fileInput').files); $('fileInput').value = ''; importFiles(fs); });
+  // several files at once: embroidery files go together (an EXP with its INF colours), pictures one by one
+  function importFiles(fs) {
+    var emb = fs.filter(function (f) { return isStitchFile(f.name); });
+    if (emb.length) importStitchFiles(emb);
+    fs.filter(function (f) { return !isStitchFile(f.name); }).forEach(importFile);
+  }
   // drag & drop files onto the window
   var dragDepth = 0;
   window.addEventListener('dragenter', function (e) { if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) { dragDepth++; $('drophint').hidden = false; } });
@@ -1363,7 +1374,7 @@
   window.addEventListener('dragover', function (e) { if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) e.preventDefault(); });
   window.addEventListener('drop', function (e) {
     dragDepth = 0; $('drophint').hidden = true;
-    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { e.preventDefault(); var df = e.dataTransfer.files[0]; if (isProjectFile(df)) openProjectFile(df); else importFile(df); }
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { e.preventDefault(); var df = e.dataTransfer.files[0]; if (isProjectFile(df)) openProjectFile(df); else importFiles(Array.prototype.slice.call(e.dataTransfer.files)); }
   });
   document.addEventListener('pointerdown', function (e) { if (pop && !pop.contains(e.target) && !e.target.closest('[data-color],[data-recolor],[data-band],#machineBtn,#paletteBtn,#projectBtn')) closePop(); }, true);
 

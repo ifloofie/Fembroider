@@ -216,7 +216,7 @@
     L.thread = L.thread === 'auto' || THREADTYPE[L.thread] ? L.thread : 'auto';
     if (!Array.isArray(L.dirs)) L.dirs = [];
     // per-area overrides from the pie menu (saved before 0.17 they don't exist)
-    var KEY = /^(colour:#[0-9a-f]{6}|fill|stroke|stroke2|shadow)$/, HOW = ['satin', 'fill', 'line', 'outline', 'skip'];
+    var KEY = /^(colour:#[0-9a-f]{6}|block:\d{1,4}|fill|stroke|stroke2|shadow)$/, HOW = ['satin', 'fill', 'line', 'outline', 'skip'];
     var ed = {}; if (L.edits && typeof L.edits === 'object') Object.keys(L.edits).forEach(function (k) { var v = L.edits[k]; if (KEY.test(k) && v && HOW.indexOf(v.stitch) >= 0) ed[k] = { stitch: v.stitch }; });
     L.edits = ed;
     L.order = Array.isArray(L.order) ? L.order.filter(function (k) { return typeof k === 'string' && KEY.test(k); }) : [];
@@ -226,6 +226,7 @@
       if (typeof L.p.tail !== 'string') L.p.tail = L.p.tail ? 'classic' : 'none'; // saved before swoop styles
       if (!(L.p.tailWeight > 0)) L.p.tailWeight = 1;
     }
+    if (L.type === 'stitches') { var sc = Math.round(+L.p.scale); L.p.scale = sc >= 85 && sc <= 115 ? sc : 100; }
     if (L.type === 'image') { // saved before Smoothing / Artwork existed
       if (!(L.p.blur >= 0 && L.p.blur <= 1.5)) L.p.blur = 0.6;
       if (['auto', 'flat', 'painting', 'line'].indexOf(L.p.art) < 0) L.p.art = 'auto';
@@ -305,6 +306,8 @@
     };
   }
   function specOf(L) {
+    // a stitch file is sewn as it is: its "spec" is just what changes the result
+    if (L.type === 'stitches') return { kind: 'stitches', src: L.p.src, scale: L.p.scale, edits: L.edits, order: L.order };
     var e = effStitch(L);
     var base = { fillMode: e.fillMode, spacingMM: e.tatamiSpacing, satinSpacingMM: e.satinSpacing, strokeSpacingMM: e.strokeSpacing, satinFill: !!doc.stitch.satin, tatamiSpacingMM: e.tatamiSpacing, tatamiStitchMM: e.tatamiStitch,
       pullCompMM: e.pullComp, satinMaxMM: e.satinMax, splitMM: e.split, underlay: e.underlay, tatamiAngleDeg: e.tatamiAngle, threadMM: e.R.width, effects: effectsSpec(L),
@@ -389,6 +392,7 @@
     var r = rt(L.id), spec = specOf(L), key = keyOf(spec);
     if (r.key === key && r.result) return;
     if (CACHE.has(key)) { applyResult(L, CACHE.get(key), key); return; }
+    if (L.type === 'stitches') { var fr = fileResult(L); if (fr) { r.error = null; applyResult(L, fr, key); refreshLayerRow(L.id); } else r.error = 'The file for this layer is missing.'; return; }
     r.want = { spec: spec, key: key };
     if (!r.busy) pump(L.id);
     updateBusy();

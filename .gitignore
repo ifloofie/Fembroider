@@ -9,3 +9,4 @@ desktop/app/*
 studio/test/stress_images/
 __pycache__/
 studio/test/bl_images/
+studio/test/emb_files/

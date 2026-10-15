@@ -47,6 +47,7 @@
   // a picture's original bytes (older autosaves kept only the decoded picture: re-encode it as PNG once)
   function sourceBlob(s) {
     if (s.blob) return Promise.resolve(s.blob);
+    if (s.kind === 'stitches') return Promise.resolve(s.blob = new Blob([s.bytes], { type: 'application/octet-stream' }));
     if (s.kind === 'svg') return Promise.resolve(new Blob([s.svg], { type: 'image/svg+xml' }));
     var c = document.createElement('canvas'); c.width = s.bitmap.width; c.height = s.bitmap.height;
     c.getContext('2d').drawImage(s.bitmap, 0, 0);
@@ -54,12 +55,17 @@
   }
   function usedSources(d) {
     var ids = [];
-    d.layers.forEach(function (L) { if (L.type === 'image' && ids.indexOf(L.p.src) < 0 && SOURCES.has(L.p.src)) ids.push(L.p.src); });
+    d.layers.forEach(function (L) { if ((L.type === 'image' || L.type === 'stitches') && ids.indexOf(L.p.src) < 0 && SOURCES.has(L.p.src)) ids.push(L.p.src); });
     return ids;
   }
   // a stored source back into a live one
   function liveSource(o) {
     if (!o || typeof o !== 'object') return Promise.reject(new Error('missing picture'));
+    if (o.kind === 'stitches') {
+      var bin = o.blob instanceof Blob ? o.blob.arrayBuffer().then(function (b) { return new Uint8Array(b); }) : typeof o.b64 === 'string' ? Promise.resolve(unb64(o.b64)) : null;
+      if (!bin) return Promise.reject(new Error('missing stitch file'));
+      return bin.then(function (u8) { return stitchSource(new Uint8Array(u8), String(o.name || 'design.dst')); });
+    }
     if (o.kind === 'svg' && typeof o.svg === 'string' && /<svg[\s>]/i.test(o.svg))
       return Promise.resolve({ kind: 'svg', svg: o.svg, name: String(o.name || 'artwork.svg'), thumb: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(o.svg) });
     var mime = /^image\/[\w.+-]+$/.test(o.mime || '') ? o.mime : 'image/png';
@@ -80,6 +86,7 @@
     return Promise.all(ids.map(function (id) {
       var s = SOURCES.get(id);
       if (s.kind === 'svg') return { kind: 'svg', name: s.name, svg: s.svg };
+      if (s.kind === 'stitches') return { kind: 'stitches', name: s.name, b64: b64(s.bytes) };
       return sourceBlob(s).then(function (b) { return b.arrayBuffer(); }).then(function (buf) { return { kind: 'bitmap', name: s.name, mime: s.mime || 'image/png', b64: b64(buf) }; });
     })).then(function (list) {
       var o = { app: 'Fembroider', format: PROJECT_FORMAT, name: project.name, saved: new Date().toISOString(), doc: d, sources: {} };
@@ -107,7 +114,7 @@
       try { normaliseLayer(L); } catch (e) { return false; }
       if (L.type === 'text') return !!FONT[L.p.font];
       if (L.type === 'emoji') return !!EMOJI[L.p.code];
-      return L.type === 'image' && SOURCES.has(L.p.src);
+      return (L.type === 'image' || L.type === 'stitches') && SOURCES.has(L.p.src);
     });
     d.fabric = safeHex(d.fabric, doc.fabric);
     if (typeof d.theme !== 'string' || (d.theme && !THEME[d.theme])) d.theme = '';
@@ -195,13 +202,13 @@
     return usedSources(d).filter(function (id) { return !storedSources[id]; }).reduce(function (p, id) {
       return p.then(function () {
         var s = SOURCES.get(id);
-        var rec = s.kind === 'svg' ? Promise.resolve({ kind: 'svg', name: s.name, svg: s.svg }) : sourceBlob(s).then(function (b) { return { kind: 'bitmap', name: s.name, mime: s.mime || 'image/png', blob: b }; });
+        var rec = s.kind === 'svg' ? Promise.resolve({ kind: 'svg', name: s.name, svg: s.svg }) : s.kind === 'stitches' ? sourceBlob(s).then(function (b) { return { kind: 'stitches', name: s.name, blob: b }; }) : sourceBlob(s).then(function (b) { return { kind: 'bitmap', name: s.name, mime: s.mime || 'image/png', blob: b }; });
         return rec.then(function (r) { return IDB.put('sources', r, id); }).then(function () { storedSources[id] = 1; });
       });
     }, Promise.resolve());
   }
   function fetchSources(d) {
-    var need = d.layers.filter(function (L) { return L.type === 'image' && !SOURCES.has(L.p.src); }).map(function (L) { return L.p.src; });
+    var need = d.layers.filter(function (L) { return (L.type === 'image' || L.type === 'stitches') && !SOURCES.has(L.p.src); }).map(function (L) { return L.p.src; });
     return Promise.all(need.map(function (id) {
       return IDB.get('sources', id).then(function (o) { return o ? liveSource(o).then(function (s) { SOURCES.set(id, s); storedSources[id] = 1; }) : null; }).catch(function () {});
     }));

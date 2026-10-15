@@ -19,6 +19,8 @@
   colours for you, or keeps the colours of an SVG.
 - **Three ways to stitch a picture.** *Flat art* for logos, *Painting* for paintings and photos, *Line art* for
   drawings and engravings (examples below).
+- **Open designs you already have.** PES, DST, EXP, JEF, VP3, HUS, XXX and PEC files, or a whole zip of them as
+  downloaded. Move them, recolour them, leave colours out, and add a name before saving for your machine.
 - **Fine-tune any part by clicking it.** Click a shape in the preview and a round menu opens right there: sew
   it as lines or an outline, leave it out, change its colour or stitch direction, or move it earlier in the order.
 - **See it in 3D before you sew.** Every stitch is drawn in a real hoop on a real fabric, with the thread's sheen.
@@ -98,6 +100,25 @@ and import it.
 ![A strawberry sticker drawn as a PNG, stitched four ways: automatically; with the black linework sewn as lines and the white border left out; and with a bean-stitch edge](docs/images/sticker-edits.jpg)
 
 Every change is undoable and saved with your project, and it stays put when you resize the design.
+
+## Open designs you already have
+
+Bought or free designs open as they are: **Import** a PES, DST, EXP, JEF, VP3, HUS, XXX or PEC file, or the zip it
+came in (Fembroider lists the designs inside and picks the format with the most thread information). The design is
+sewn exactly as it was digitized, every stitch kept.
+
+![A strawberry design opened from a PES file, with the word Welcome added underneath, in dark mode. Clicking it opens the round menu with Colour, Sew order, Leave out and Layer](docs/images/open-design.jpg)
+
+- **Combine** it with text, emoji or your own pictures in the same hoop, then save it for your machine. That also
+  makes Fembroider a format converter (a PES becomes an EXP for a Bernina, for example).
+- **Recolour** any thread, **leave a colour out**, or **sew it earlier or later**: click it in the preview, or use the
+  list of colours in the panel.
+- **Resize** by up to 15% either way. Finished stitches can't be scaled further without spoiling their density, so
+  for a much bigger or smaller version, look for the design in that size.
+- DST and EXP files don't store thread colours, so they open with placeholder colours for you to pick. An EXP opened
+  together with its INF file keeps its colours.
+- Working files from other programs (like Wilcom's .EMB) can only be opened in those programs. Look for a PES, DST,
+  EXP or JEF version of the same design.
 
 ## Works with your machine
 
