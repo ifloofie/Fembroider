@@ -17,8 +17,8 @@
 - **Add an emoji.** Every emoji is ready to stitch, in its own colours.
 - **Bring in your own pictures.** Logos, clipart, drawings, even paintings and photos. Fembroider picks the thread
   colours for you, or keeps the colours of an SVG.
-- **Line drawings and engravings stay lines.** Choose *Line art* and drawings are stitched with fine running stitch
-  instead of being filled in, with the shading turned into stitched hatching (see below).
+- **Three ways to stitch a picture.** *Flat art* for logos, *Painting* for paintings and photos, *Line art* for
+  drawings and engravings (examples below).
 - **See it in 3D before you sew.** Every stitch is drawn in a real hoop on a real fabric, with the thread's sheen.
   Press *Play* to watch it stitch out in order.
 - **Get the file your machine reads.** Choose your machine from the list and Fembroider saves the right kind of
@@ -26,7 +26,37 @@
 - **Save your work as a project.** Projects keep everything, including your pictures, and Fembroider saves as you go,
   so closing the window never loses your design.
 
-## Line art: drawings stitched as drawings
+## Three ways to stitch a picture
+
+When you import a picture, the **Artwork** setting decides how it becomes stitches. Fembroider picks Flat art or Painting for you, and
+you can switch at any time and compare. (When a picture looks like a drawing, it suggests Line art.)
+
+- **Flat art** keeps every edge sharp. Best for logos, clipart and cartoons with clean areas of colour.
+- **Painting** smooths brushwork and grain into calmer patches of colour. Best for paintings and photos: they sew
+  much faster and with far fewer *jumps* (each time the machine stops, ties off and moves to a new spot).
+- **Line art** follows the lines of a drawing with fine running stitch and turns shading into stitched hatching,
+  in one thread. Best for ink drawings, engravings and woodcuts.
+
+### Paintings
+
+Each example shows the original, then *Flat art*, then *Painting*, all at 12 cm with six thread colours.
+
+![Monet's Impression, Sunrise: the original, Flat art, and Painting](docs/images/painting-monet-impression-sunrise.jpg)
+<sub>Claude Monet, *Impression, Sunrise* (1872). Flat art: 314 jumps, about 50 minutes. Painting: 78 jumps, about 36 minutes.</sub>
+
+![Monet's Japanese footbridge over the water-lily pond: the original, Flat art, and Painting](docs/images/painting-monet-japanese-bridge.jpg)
+<sub>Claude Monet, the Japanese footbridge at Giverny (1899). Flat art: 270 jumps, about 58 minutes. Painting: 81 jumps, about 41 minutes.
+The grey-blue bridge keeps its own thread even though it's a small part of the picture.</sub>
+
+![Monet's flower garden at Giverny: the original, Flat art, and Painting](docs/images/painting-monet-garden-giverny.jpg)
+<sub>Claude Monet, *The Artist's Garden at Giverny* (1900). Flat art: 594 jumps, about 81 minutes. Painting: 158 jumps, about 47 minutes.</sub>
+
+![Rembrandt's The Jewish Bride: the original, Flat art, and Painting](docs/images/painting-rembrandt-jewish-bride.jpg)
+<sub>Rembrandt, *The Jewish Bride* (about 1665). Flat art: 286 jumps, about 57 minutes. Painting: 27 jumps, about 33 minutes.</sub>
+
+Flat art catches more of the brush texture; Painting gives you something you'll actually enjoy sewing. Try both.
+
+### Line art
 
 Most embroidery programs fill everything in, which turns a pen drawing into a blotchy shape. Fembroider can follow
 the lines instead.
@@ -35,6 +65,8 @@ the lines instead.
 
 <sub>John Tenniel's illustration for *Alice's Adventures in Wonderland* (1865) at 15 cm. Left: the original. Middle:
 filled in the usual way, five threads and about 51 minutes. Right: Fembroider's line art, one thread and about 34 minutes.</sub>
+
+All the artworks shown are in the public domain.
 
 ## Works with your machine
 
