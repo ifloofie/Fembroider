@@ -1937,6 +1937,7 @@ var StitchEngine = (function () {
     return cents;
   }
 
+  var LASTNEAR = null;
   function rasterColours(createCanvas, spec, marginMM) {
     var src = spec.source, sw = src.width, sh = src.height;
     var sizePx = Math.max(5, spec.sizeMM || 60) * PX, sc = sizePx / Math.max(sw, sh);
@@ -1951,7 +1952,15 @@ var StitchEngine = (function () {
     ctx.drawImage(src, ox, oy, dw, dh);
     var d = ctx.getImageData(0, 0, W, H).data;
     // palette
-    var pal = (spec.palette || []).map(hexToRgb);
+    var pal = (spec.palette || []).map(hexToRgb), autoPal = !pal.length, graphic = !autoPal;
+    // SVG artwork with a dozen-plus fills (coats of arms, detailed clipart): merge the closest pair of colours until
+    // a sewable number of threads remains; pixels then take the remaining nearest colour (paint order is kept)
+    var MAXT = spec.maxThreads || 12;
+    while (pal.length > MAXT) {
+      var bi = 0, bj = 1, bd = Infinity;
+      for (var pi = 0; pi < pal.length; pi++) for (var pj = pi + 1; pj < pal.length; pj++) { var dd0 = colDist(pal[pi], pal[pj]); if (dd0 < bd) { bd = dd0; bi = pi; bj = pj; } }
+      pal.splice(bj, 1);
+    }
     var anyTransparent = false;
     for (var i = 0; i < W * H; i++) {
       var x = i % W, y = (i / W) | 0;
@@ -1967,11 +1976,68 @@ var StitchEngine = (function () {
       }
       var samples = Object.keys(bins).map(function (k) { var b = bins[k]; return [b[0] / b[3], b[1] / b[3], b[2] / b[3], b[3]]; });
       samples.sort(function (a, b) { return b[3] - a[3]; });
-      pal = samples.length ? kmeans(samples.slice(0, 600), Math.max(1, Math.min(10, spec.maxColors || 6)), 8) : [];
+      var K = Math.max(1, Math.min(10, spec.maxColors || 6));
+      pal = samples.length ? kmeans(samples.slice(0, 600), K, 8) : [];
+      // Flat graphics (prints, logos, line art) sit within a short distance of a few inks; paintings and photos
+      // don't. Graphics keep these crisp colours and are labelled sharp. For paintings, weight each colour bin by the
+      // square root of its area, so a small but distinct accent (a blue bridge, a teal bow) can win a thread instead
+      // of a third shade of the dominant brown, and smooth before labelling (below).
+      var near = [0, 0, 0, 0], all = 0, TH = [30, 45, 60, 80];
+      samples.forEach(function (sm) { var bd5 = Infinity; pal.forEach(function (c) { bd5 = Math.min(bd5, colDist(sm, c)); }); all += sm[3]; TH.forEach(function (t, ti) { if (bd5 < t) near[ti] += sm[3]; }); });
+      LASTNEAR = near.map(function (v) { return all ? +(v / all).toFixed(3) : 0; });
+      graphic = spec.graphic !== undefined ? !!spec.graphic : all > 0 && near[1] / all > 0.87;
+      if (!graphic && samples.length) {
+        // accent rescue: an area-weighted palette averages away a small but clearly different hue (Monet's blue
+        // bridge, a teal bow). Find the worst-matched colour that still covers a real patch of the picture and swap
+        // it in for the palette colour that costs least to lose, if the picture as a whole stays about as well matched.
+        var errOf = function (P) { var e2 = 0; samples.forEach(function (sm) { var bd6 = Infinity; P.forEach(function (c) { bd6 = Math.min(bd6, colDist(sm, c)); }); e2 += sm[3] * Math.min(bd6, 120) * Math.min(bd6, 120); }); return e2; };
+        var total = samples.reduce(function (a7, sm) { return a7 + sm[3]; }, 0);
+        for (var acc = 0; acc < 2 && pal.length > 2; acc++) {
+          // candidates: badly matched colours, scored by how much of the picture lies close to them
+          var poor = samples.slice(0, 1500).filter(function (sm) { var bd7 = Infinity; pal.forEach(function (c) { bd7 = Math.min(bd7, colDist(sm, c)); }); sm.miss = bd7; return bd7 > 70; });
+          var cand = null, cs = 0;
+          poor.forEach(function (sm) { var mass = 0; poor.forEach(function (o) { if (colDist(o, sm) < 45) mass += o[3]; }); var sc = mass * sm.miss; if (sc > cs) { cs = sc; cand = sm; } });
+          if (!cand) break;
+          var cw = 0, cm = [0, 0, 0];
+          samples.forEach(function (sm) { if (colDist(sm, cand) < 45) { cw += sm[3]; cm[0] += sm[0] * sm[3]; cm[1] += sm[1] * sm[3]; cm[2] += sm[2] * sm[3]; } });
+          if (cw < 0.006 * total) break;
+          var accent = [cm[0] / cw, cm[1] / cw, cm[2] / cw], base0 = errOf(pal), bestJ = -1, bestE = Infinity;
+          for (var j7 = 0; j7 < pal.length; j7++) { if (pal[j7].accent) continue; var trial = pal.slice(); trial[j7] = accent; var e7 = errOf(trial); if (e7 < bestE) { bestE = e7; bestJ = j7; } }
+          if (bestJ < 0 || bestE > base0 * 1.25) break;
+          accent.accent = true; pal[bestJ] = accent;
+        }
+      }
       // merge near-duplicates
       var merged = [];
       pal.forEach(function (c2) { if (!merged.some(function (m) { return colDist(m, c2) < 40; })) merged.push(c2); });
       pal = merged;
+    }
+    // photos: the colours are chosen from the sharp picture (so a two-tone print stays two-tone), then each pixel is
+    // labelled from a lightly blurred copy (box blur x2 ~ gaussian, edges clamped, alpha untouched), so brush texture
+    // and grain don't break the colour areas into crumbs
+    var blurPx = autoPal && !graphic ? Math.round((spec.blurMM === undefined ? 0.6 : spec.blurMM) * PX) : 0;
+    if (blurPx > 0) {
+      var tmp = new Float32Array(Math.max(dw, dh));
+      for (var ch = 0; ch < 3; ch++) for (var bp = 0; bp < 2; bp++) {
+        for (var ry = oy; ry < oy + dh; ry++) { // rows
+          var acc = 0, row = ry * W;
+          for (var rx = -blurPx; rx <= blurPx; rx++) acc += d[(row + ox + Math.min(dw - 1, Math.max(0, rx))) * 4 + ch];
+          for (var rx2 = 0; rx2 < dw; rx2++) {
+            tmp[rx2] = acc / (2 * blurPx + 1);
+            acc += d[(row + ox + Math.min(dw - 1, rx2 + blurPx + 1)) * 4 + ch] - d[(row + ox + Math.max(0, rx2 - blurPx)) * 4 + ch];
+          }
+          for (rx2 = 0; rx2 < dw; rx2++) d[(row + ox + rx2) * 4 + ch] = tmp[rx2];
+        }
+        for (var cx2 = ox; cx2 < ox + dw; cx2++) { // columns
+          var acc2 = 0;
+          for (var cy = -blurPx; cy <= blurPx; cy++) acc2 += d[((oy + Math.min(dh - 1, Math.max(0, cy))) * W + cx2) * 4 + ch];
+          for (var cy2 = 0; cy2 < dh; cy2++) {
+            tmp[cy2] = acc2 / (2 * blurPx + 1);
+            acc2 += d[((oy + Math.min(dh - 1, cy2 + blurPx + 1)) * W + cx2) * 4 + ch] - d[((oy + Math.max(0, cy2 - blurPx)) * W + cx2) * 4 + ch];
+          }
+          for (cy2 = 0; cy2 < dh; cy2++) d[((oy + cy2) * W + cx2) * 4 + ch] = tmp[cy2];
+        }
+      }
     }
     // label every pixel with its nearest palette colour (-1 = background)
     var labels = new Int8Array(W * H).fill(-1);
@@ -1987,11 +2053,60 @@ var StitchEngine = (function () {
       var cnt = pal.map(function () { return 0; });
       for (var bx = ox; bx < ox + dw; bx++) { cnt[labels[oy * W + bx]]++; cnt[labels[(oy + dh - 1) * W + bx]]++; }
       for (var by = oy; by < oy + dh; by++) { cnt[labels[by * W + ox]]++; cnt[labels[by * W + ox + dw - 1]]++; }
-      bgIndex = cnt.indexOf(Math.max.apply(null, cnt));
-      for (var r = 0; r < W * H; r++) if (labels[r] === bgIndex) labels[r] = -1;
+      var top = Math.max.apply(null, cnt), border = 2 * (dw + dh);
+      // only a colour that clearly owns the border is background, and only where it reaches the border: the same
+      // colour inside the picture (dark clothes in a dark painting) is part of the design
+      // paper photographed under uneven light splits into two or three close shades: they count as one background
+      var topI = cnt.indexOf(top), isBg = pal.map(function (c, k) { return k === topI || (cnt[k] >= 0.1 * border && colDist(c, pal[topI]) < 70); });
+      var bgShare = cnt.reduce(function (a2, n, k) { return a2 + (isBg[k] ? n : 0); }, 0);
+      if (bgShare >= 0.45 * border) {
+        bgIndex = topI;
+        var stk = [];
+        var seed = function (q) { if (labels[q] >= 0 && isBg[labels[q]]) { labels[q] = -1; stk.push(q); } };
+        for (var bx2 = ox; bx2 < ox + dw; bx2++) { seed(oy * W + bx2); seed((oy + dh - 1) * W + bx2); }
+        for (var by2 = oy; by2 < oy + dh; by2++) { seed(by2 * W + ox); seed(by2 * W + ox + dw - 1); }
+        while (stk.length) {
+          var v0 = stk.pop(), vx0 = v0 % W;
+          if (vx0 > 0) seed(v0 - 1); if (vx0 < W - 1) seed(v0 + 1); if (v0 >= W) seed(v0 - W); if (v0 < W * (H - 1)) seed(v0 + W);
+        }
+        // flat art (a print, a logo on paper): the paper inside closed shapes is paper too
+        if (graphic) for (var r6 = 0; r6 < W * H; r6++) if (labels[r6] >= 0 && isBg[labels[r6]]) labels[r6] = -1;
+      }
+    }
+    // Posterized photos are full of filaments thinner than a fill can show (they stitch as one to three stray rows,
+    // each costing a jump and a trim). Fold anything narrower than minWidth into its neighbours: an opening per colour.
+    if (!spec.palette && !graphic && spec.smooth !== false) {
+      var R0 = Math.max(1, Math.round((spec.minWidthMM || 0.9) / 2 * PX)), thin = new Uint8Array(W * H), anyThin = false;
+      for (var a3 = 0; a3 < pal.length; a3++) {
+        var m3 = newMask(), has3 = false;
+        for (var z3 = 0; z3 < W * H; z3++) if (labels[z3] === a3) { m3[z3] = 1; has3 = true; }
+        if (!has3) continue;
+        var d3 = edt(m3, false), core = newMask();
+        for (z3 = 0; z3 < W * H; z3++) if (d3[z3] > R0) core[z3] = 1;
+        var opened = dilateMask(core, R0 + 0.5);
+        for (z3 = 0; z3 < W * H; z3++) if (m3[z3] && !opened[z3]) { thin[z3] = 1; anyThin = true; }
+      }
+      // grow the surrounding colours into the removed filaments (several passes, majority of labelled neighbours)
+      for (var pass3 = 0; anyThin && pass3 < 3 * R0 + 4; pass3++) {
+        var moved = false, next = labels.slice();
+        for (var z4 = 0; z4 < W * H; z4++) {
+          if (!thin[z4]) continue;
+          var t4 = {}, b4 = null, n4 = 0, x4 = z4 % W;
+          for (var k4 = 0; k4 < 8; k4++) {
+            var u4 = z4 + [-1, 1, -W, W, -W - 1, -W + 1, W - 1, W + 1][k4];
+            if (u4 < 0 || u4 >= W * H || thin[u4]) continue;
+            if ((x4 === 0 && (k4 === 0 || k4 === 4 || k4 === 6)) || (x4 === W - 1 && (k4 === 1 || k4 === 5 || k4 === 7))) continue;
+            var l4 = labels[u4]; t4[l4] = (t4[l4] || 0) + 1;
+            if (t4[l4] > n4) { n4 = t4[l4]; b4 = l4; }
+          }
+          if (b4 !== null) { next[z4] = b4; thin[z4] = 0; moved = true; }
+        }
+        labels = next;
+        if (!moved) break;
+      }
     }
     // absorb specks smaller than minArea into their most common neighbour label
-    var minArea = Math.round((spec.minAreaMM2 || 0.8) * PX * PX);
+    var minArea = Math.round((spec.minAreaMM2 || (graphic ? 0.8 : 2)) * PX * PX); // paintings: bigger specks fold in
     var seen = new Uint8Array(W * H);
     for (var s0 = 0; s0 < W * H; s0++) {
       if (seen[s0] || labels[s0] < 0) continue;
@@ -2016,7 +2131,6 @@ var StitchEngine = (function () {
     // ever forms thin rims (never deeper than 0.5 mm) is an artefact, so fold it into its neighbours
     if (!spec.palette) {
       for (var a = 0; a < pal.length; a++) {
-        if (a === bgIndex) continue;
         var am = newMask(), any = false;
         for (var z0 = 0; z0 < W * H; z0++) if (labels[z0] === a) { am[z0] = 1; any = true; }
         if (!any) continue;
@@ -2043,14 +2157,32 @@ var StitchEngine = (function () {
     }
     var colours = [];
     pal.forEach(function (c3, idx) {
-      if (idx === bgIndex) return;
       var m = newMask(), n = 0;
       for (var z = 0; z < W * H; z++) if (labels[z] === idx) { m[z] = 1; n++; }
       if (n < minArea) return;
       colours.push({ role: 'colour', color: rgbToHex(c3), mask: m, area: n });
     });
-    if (!spec.palette) colours.sort(function (a, b) { return b.area - a.area; });
-    return { colours: colours, bgRemoved: bgIndex >= 0 ? rgbToHex(pal[bgIndex]) : null };
+    // a photo's colours sit side by side, not on top of each other, so their order is free: the most broken-up
+    // colour sews first, because its travel runs can hide under every colour that follows
+    if (!spec.palette) {
+      colours.forEach(function (c) {
+        var seen = new Uint8Array(W * H), n = 0, st = [];
+        for (var i = 0; i < W * H; i++) {
+          if (!c.mask[i] || seen[i]) continue;
+          n++; seen[i] = 1; st.push(i);
+          while (st.length) {
+            var v = st.pop(), vx = v % W;
+            if (vx > 0 && c.mask[v - 1] && !seen[v - 1]) { seen[v - 1] = 1; st.push(v - 1); }
+            if (vx < W - 1 && c.mask[v + 1] && !seen[v + 1]) { seen[v + 1] = 1; st.push(v + 1); }
+            if (v >= W && c.mask[v - W] && !seen[v - W]) { seen[v - W] = 1; st.push(v - W); }
+            if (v < W * (H - 1) && c.mask[v + W] && !seen[v + W]) { seen[v + W] = 1; st.push(v + W); }
+          }
+        }
+        c.pieces = n;
+      });
+      colours.sort(function (a, b) { return b.pieces - a.pieces || b.area - a.area; });
+    }
+    return { colours: colours, bgRemoved: bgIndex >= 0 ? rgbToHex(pal[bgIndex]) : null, painting: autoPal && !graphic, near: LASTNEAR };
   }
 
   // ---------- one layer ----------
@@ -2206,7 +2338,7 @@ var StitchEngine = (function () {
     } else {
       var rc = rasterColours(cc, spec, marginMM);
       colours = rc.colours;
-      meta.bgRemoved = rc.bgRemoved;
+      meta.bgRemoved = rc.bgRemoved; meta.painting = !!rc.painting; meta.near = rc.near;
       if (spec.recolor) colours.forEach(function (c4, i4) { if (spec.recolor[i4]) c4.color = spec.recolor[i4]; });
     }
 

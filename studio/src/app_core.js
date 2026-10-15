@@ -166,6 +166,10 @@
       if (typeof L.p.tail !== 'string') L.p.tail = L.p.tail ? 'classic' : 'none'; // saved before swoop styles
       if (!(L.p.tailWeight > 0)) L.p.tailWeight = 1;
     }
+    if (L.type === 'image') { // saved before Smoothing / Artwork existed
+      if (!(L.p.blur >= 0 && L.p.blur <= 1.5)) L.p.blur = 0.6;
+      if (['auto', 'flat', 'painting'].indexOf(L.p.art) < 0) L.p.art = 'auto';
+    }
     return L;
   }
   // thread materials: preview sheen and the PBR bake (roughness / metallic)
@@ -197,7 +201,7 @@
     var t = THEME[doc.theme] || A.themes[0];
     var fx = defaultFx(); fx.stroke.on = false;
     return { id: newId(), type: 'image', name: name, visible: true, locked: false, thread: 'auto', dirs: [],
-      tf: { x: 0, y: 0, rot: 0, mx: false, my: false }, p: { src: srcId, size: sizeMM, maxColors: 5, removeBg: true, palette: 'svg' },
+      tf: { x: 0, y: 0, rot: 0, mx: false, my: false }, p: { src: srcId, size: sizeMM, maxColors: 5, blur: 0.6, art: 'auto', removeBg: true, palette: 'svg' },
       colors: themeColors(t), fx: fx };
   }
 
@@ -250,7 +254,7 @@
       return Object.assign(base, { kind: 'raster', sizeMM: L.p.size, palette: E.parseSvgPalette(e.svg), srcKey: 'emoji:' + L.p.code });
     }
     var src = SOURCES.get(L.p.src) || {};
-    var o = Object.assign(base, { kind: 'raster', sizeMM: L.p.size, maxColors: L.p.maxColors, removeBg: !!L.p.removeBg, srcKey: 'src:' + L.p.src });
+    var o = Object.assign(base, { kind: 'raster', sizeMM: L.p.size, maxColors: L.p.maxColors, blurMM: L.p.blur === undefined ? 0.6 : L.p.blur, graphic: L.p.art === 'flat' ? true : L.p.art === 'painting' ? false : undefined, removeBg: !!L.p.removeBg, srcKey: 'src:' + L.p.src });
     // SVGs keep their own flat fills (in paint order) unless the user asks for automatic colour reduction
     if (src.kind === 'svg' && L.p.palette !== 'auto') {
       if (!src.palette) { try { src.palette = E.parseSvgPalette(src.svg); } catch (e) { src.palette = []; } }

@@ -6,3 +6,4 @@ desktop/dist/
 desktop/app/*
 !desktop/app/icon.png
 *.log
+studio/test/stress_images/

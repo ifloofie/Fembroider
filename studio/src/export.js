@@ -43,17 +43,31 @@ var StitchExport = (function () {
     if (run.length > 1) runs.push(run);
     return runs;
   }
+  // nearest-neighbour order for running paths; open paths may run either way, and closed loops (an island's edge
+  // underlay) start and end at the vertex nearest the needle instead of wherever the outline happened to begin
+  // an edge underlay comes back to within a stitch or two of where it began
+  function isLoop(p) {
+    if (p.length < 6) return false;
+    var gap = dist(p[0], p[p.length - 1]), len = 0;
+    for (var i = 1; i < p.length; i++) len += dist(p[i - 1], p[i]);
+    return gap < 3 && len > 6 * gap + 4;
+  }
   function nnOrder(paths, from) {
     var left = paths.slice(), res = [], cur = from || null;
     while (left.length) {
-      var bi = 0, flip = false, bd = Infinity;
+      var bi = 0, flip = false, rot = 0, bd = Infinity;
       left.forEach(function (p, i) {
-        if (!cur) { var d = p[0][0]; if (d < bd) { bd = d; bi = i; flip = false; } return; }
+        if (!cur) { var d = p[0][0]; if (d < bd) { bd = d; bi = i; flip = false; rot = 0; } return; }
+        if (isLoop(p)) {
+          for (var k = 0; k < p.length - 1; k++) { var dk = dist(cur, p[k]); if (dk < bd) { bd = dk; bi = i; flip = false; rot = k; } }
+          return;
+        }
         var d0 = dist(cur, p[0]), d1 = dist(cur, p[p.length - 1]);
-        if (d0 < bd) { bd = d0; bi = i; flip = false; }
-        if (d1 < bd) { bd = d1; bi = i; flip = true; }
+        if (d0 < bd) { bd = d0; bi = i; flip = false; rot = 0; }
+        if (d1 < bd) { bd = d1; bi = i; flip = true; rot = 0; }
       });
       var p = left.splice(bi, 1)[0];
+      if (rot) p = dist(p[0], p[p.length - 1]) < 0.05 ? p.slice(rot, p.length - 1).concat(p.slice(0, rot + 1)) : p.slice(rot).concat(p.slice(0, rot + 1));
       if (flip) p = p.slice().reverse();
       res.push(p); cur = p[p.length - 1];
     }
@@ -125,7 +139,9 @@ var StitchExport = (function () {
         }
         var total = 0, prv = a;
         out.forEach(function (p) { total += dist(prv, p); prv = p; });
-        return total > 3 * dist(a, b) + 15 ? null : out;
+        // a route through a curly script word can be a few times the straight distance; it still beats a jump,
+        // because the ground it runs over gets covered by the fill
+        return total > 4.5 * dist(a, b) + 30 ? null : out;
       }
     };
   }
@@ -251,6 +267,41 @@ var StitchExport = (function () {
     }
     return out;
   }
+  // underlay runs inside one island, swept left to right like the islands themselves (loops start at their
+  // vertex nearest the needle, open runs may go either way)
+  function sweepPaths(paths, from, then) {
+    if (paths.length < 3) return nnOrder(paths, from);
+    // plan the sweep both ways (left to right, and mirrored) and keep the one with less travel: from the needle to
+    // the first run, between runs, and from the last run to where the fill starts
+    var flipX = function (q) { return [-q[0], q[1]]; };
+    var a = sweepPaths0(paths, from);
+    var b = sweepPaths0(paths.map(function (p) { return p.map(flipX); }), from ? flipX(from) : null).map(function (p) { return p.map(flipX); });
+    function travel(plan) {
+      var t = 0, at = from;
+      // reaching the first run usually means a jump (and a trim), and going left breaks the sweep; the way back to
+      // the fill start runs hidden inside the island, so it costs plain distance
+      plan.forEach(function (p, i) { if (at) t += i ? dist(at, p[0]) : 3 * dist(at, p[0]) + SW_BACK * Math.max(0, at[0] - p[0][0]); at = p[p.length - 1]; });
+      if (then && at) t += dist(at, then);
+      return t;
+    }
+    return travel(b) < travel(a) ? b : a;
+  }
+  function sweepPaths0(paths, from) {
+    var items = paths.map(function (p) {
+      var x0 = Infinity, x1 = -Infinity; p.forEach(function (q) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); });
+      var it = { p: p, x0: x0, x1: x1, ends: [p[0], p[p.length - 1]], reversible: true };
+      if (isLoop(p)) { it.near = function (pos) { var bk = 0, bd = Infinity; for (var k = 0; k < p.length - 1; k++) { var d = dist(p[k], pos); if (d < bd) { bd = d; bk = k; } } return p[bk]; }; it.reversible = false; }
+      return it;
+    });
+    var out = [], cur = from;
+    sweepOrder(items, from).forEach(function (o) {
+      var p = o.item.p;
+      if (o.item.near && cur) { var one = nnOrder([p], cur)[0]; out.push(one); cur = one[one.length - 1]; return; }
+      if (o.rev) p = p.slice().reverse();
+      out.push(p); cur = p[p.length - 1];
+    });
+    return out;
+  }
   function reverseChords(cs) { return cs.slice().reverse().map(function (c) { var d = c.slice(); d[0] = c[2]; d[1] = c[3]; d[2] = c[0]; d[3] = c[1]; return d; }); }
   function buildSequence(placed, opts) {
     opts = opts || {};
@@ -295,7 +346,8 @@ var StitchExport = (function () {
             var g = o.item;
             if (o.rev) g = { chords: reverseChords(g.chords), under: g.under };
             var under = g.under.filter(function (pl) { return pl.length > 1; }).map(function (pl) { return resample(pl, RUN_LEN).map(W); });
-            nnOrder(under, seq.last).forEach(function (p) { seq.path(p); });
+            var fillStart = g.chords.length ? W([g.chords[0][0], g.chords[0][1]]) : null;
+            sweepPaths(under, seq.last, fillStart).forEach(function (p) { seq.path(p); });
             var scatter = g.chords.filter(function (c) { return c[4] === 1 || c[4] === 4; });
             var main = g.chords.filter(function (c) { return !(c[4] === 1 || c[4] === 4); });
             nnOrder(chordRuns(scatter).map(function (r) { return r.map(W); }), seq.last).forEach(function (p) { seq.path(p); });

@@ -330,9 +330,15 @@
       '<div style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.name || L.name) + '</b><span class="note">' + kind + '</span></div></div>' +
       rangeRow('Size', 'L.p.size', 15, 190, 1, 0, ' mm') + threadHtml(L) +
       (isSvg ? row('Colours', seg('L.p.palette', [['svg', 'From SVG fills'], ['auto', 'Reduce']], { rerender: true, label: 'Colour source' })) : '') +
-      (!isSvg || L.p.palette === 'auto' ? rangeRow('Max colours', 'L.p.maxColors', 2, 8, 1, 0, '') : '') +
+      (!isSvg || L.p.palette === 'auto' ? rangeRow('Max colours', 'L.p.maxColors', 2, 8, 1, 0, '') +
+        row('Artwork', seg('L.p.art', [['auto', 'Auto'], ['flat', 'Flat art'], ['painting', 'Painting']], { rerender: true, label: 'Artwork type' })) +
+        (L.p.art === 'flat' || (L.p.art === 'auto' && rt(L.id).result && rt(L.id).result.meta && rt(L.id).result.meta.painting === false) ? '' : rangeRow('Smoothing', 'L.p.blur', 0, 1.5, 0.1, 1, ' mm')) : '') +
       check('L.p.removeBg', 'Remove background', {}) +
-      '<p class="note">Thin details under about 0.6 mm are merged into neighbouring colours so every area can be stitched.</p>' +
+      (rt(L.id).result && !rt(L.id).busy && !(rt(L.id).result.stitchCount > 0) ? '<p class="note err">Nothing here can be stitched at this size: every detail is thinner than a fill can show (about 0.9 mm). Make the picture bigger' + (!isSvg || L.p.palette === 'auto' ? ', lower Smoothing or use fewer colours' : ' or reduce its colours') + '.</p>' : '') +
+      '<p class="note">' + (!isSvg || L.p.palette === 'auto' ? (rt(L.id).result && rt(L.id).result.meta && rt(L.id).result.meta.painting === false
+        ? (L.p.art === 'flat' ? 'Flat art: edges are kept sharp. ' : 'This looks like flat artwork (a print, logo or line art), so its edges are kept sharp. Choose Painting to smooth it instead. ')
+        : 'Smoothing calms brush texture and grain in paintings and photos: more smoothing means fewer, larger areas and fewer jumps. ') : '') +
+      'Details thinner than about 0.9 mm are merged into neighbouring colours, since a fill cannot show them.</p>' +
       '<div class="lab" style="font-size:13.5px">Thread colours</div><div id="recolorBox">' + recolorHtml(L) + '</div>');
   }
   function effectsHtml(L) {

@@ -1,4 +1,4 @@
-# Stitch Studio — source (v0.12.0)
+# Stitch Studio — source (v0.13.0)
 
 Embroidery digitizer and 3D stitch preview. Machines: 197 home and commercial models from 17 brands (Brother,
 Baby Lock, Janome, Elna, BERNINA, bernette, PFAFF, Husqvarna Viking, Singer, Poolin, Tajima, Barudan, Happy, SWF,
@@ -55,6 +55,10 @@ Desktop (Windows installer):
     cd studio
     node test/t_export.mjs        # likewise t_bands, t_gradient, t_threads, t_effects, t_fonts, t_emoji, t_import
     node test/t_formats.mjs && python3 test/check_formats.py   # every format read back with pyembroidery
+    node test/stress.mjs fonts|emoji|images [start] [end]      # stress sweep: travel, jumps, stitch outliers (JSON lines)
+    node test/trace_jumps.mjs <emoji code | font:Family:Text | img:path>   # every jump of one design, for debugging
+
+The image sweep reads test/stress_images/ (not in the repo: add your own public-domain paintings and clipart).
     node test/quality.mjs         # stitch-quality harness (coverage, show-through, crossings, edge angles)
     python3 test/ui.py            # headless browser run of the whole app (needs Playwright + Chromium)
 
