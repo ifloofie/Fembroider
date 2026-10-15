@@ -36,10 +36,34 @@ When you import a picture, the **Artwork** setting decides how it becomes stitch
 you can switch at any time and compare. (When a picture looks like a drawing, it suggests Line art.)
 
 - **Flat art** keeps every edge sharp. Best for logos, clipart and cartoons with clean areas of colour.
-- **Painting** smooths brushwork and grain into calmer patches of colour. Best for paintings and photos: they sew
-  much faster and with far fewer *jumps* (each time the machine stops, ties off and moves to a new spot).
 - **Line art** follows the lines of a drawing with fine running stitch and turns shading into stitched hatching,
   in one thread. Best for ink drawings, engravings and woodcuts, and for star charts and other light-on-dark plates.
+- **Painting** smooths brushwork and grain into calmer patches of colour. Best for paintings and photos: they sew
+  much faster and with far fewer *jumps* (each time the machine stops, ties off and moves to a new spot).
+
+### Line art
+
+Most embroidery programs fill everything in, which turns a pen drawing into a blotchy shape. Fembroider can follow
+the lines instead.
+
+![An engraving of Alice with the Gryphon. Left: the original. Middle: the usual filled-in result, a grey blur. Right: Fembroider's line art, which keeps the lines and the shading.](docs/images/line-art-tenniel.jpg)
+
+<sub>John Tenniel's illustration for *Alice's Adventures in Wonderland* (1865) at 15 cm. Left: the original. Middle:
+filled in the usual way, five threads and about 51 minutes. Right: Fembroider's line art, one thread and about 34 minutes.</sub>
+
+![A woodcut from the Nuremberg Chronicle: skeletons dancing over a hatched landscape. Left: the original. Middle: the usual filled-in result, a grey blur. Right: Fembroider's line art, with the cut lines, hatching and solid blacks kept.](docs/images/line-art-woodcut.jpg)
+
+<sub>*The Dance of Death*, a woodcut from the Nuremberg Chronicle (1493), Michael Wolgemut's workshop, at 15 cm. Left: the
+original. Middle: filled in the usual way, five threads and about 82 minutes. Right: Fembroider's line art, one thread and
+about 53 minutes. Medieval block prints, with their bold cut lines, suit line art especially well.</sub>
+
+Line art also works the other way round: white stars, comets and white-line prints on a dark ground. The light marks
+are sewn in a light thread (stars become small tacked dots) and the dark ground is left to the fabric, so you sew them
+on dark fabric.
+
+![Two 19th-century astronomy plates: a comet and its nucleus, and Encke's Comet among stars. Each original is shown next to Fembroider's line-art version on dark fabric, with the comets and stars in pale thread.](docs/images/line-art-light-on-dark.jpg)
+
+<sub>Plates from the British Library's digitised books: "Head and Nucleus of Comet, 1811" and "Encke's Comet", each at 10 cm.</sub>
 
 ### Paintings
 
@@ -59,24 +83,6 @@ The grey-blue bridge keeps its own thread even though it's a small part of the p
 <sub>Rembrandt, *The Jewish Bride* (about 1665). Flat art: 286 jumps, about 57 minutes. Painting: 27 jumps, about 33 minutes.</sub>
 
 Flat art catches more of the brush texture; Painting gives you something you'll actually enjoy sewing. Try both.
-
-### Line art
-
-Most embroidery programs fill everything in, which turns a pen drawing into a blotchy shape. Fembroider can follow
-the lines instead.
-
-![An engraving of Alice with the Gryphon. Left: the original. Middle: the usual filled-in result, a grey blur. Right: Fembroider's line art, which keeps the lines and the shading.](docs/images/line-art-tenniel.jpg)
-
-<sub>John Tenniel's illustration for *Alice's Adventures in Wonderland* (1865) at 15 cm. Left: the original. Middle:
-filled in the usual way, five threads and about 51 minutes. Right: Fembroider's line art, one thread and about 34 minutes.</sub>
-
-Line art also works the other way round: white stars, comets and white-line prints on a dark ground. The light marks
-are sewn in a light thread (stars become small tacked dots) and the dark ground is left to the fabric, so you sew them
-on dark fabric.
-
-![Two 19th-century astronomy plates: a comet and its nucleus, and Encke's Comet among stars. Each original is shown next to Fembroider's line-art version on dark fabric, with the comets and stars in pale thread.](docs/images/line-art-light-on-dark.jpg)
-
-<sub>Plates from the British Library's digitised books: "Head and Nucleus of Comet, 1811" and "Encke's Comet", each at 10 cm.</sub>
 
 All the artworks shown are in the public domain.
 
