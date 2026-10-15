@@ -2273,6 +2273,176 @@ var StitchEngine = (function () {
   }
 
   var LASTLINE = null;
+  // centrelines of a mask of thin marks, as running stitch in as few unbroken runs as possible (Euler routing with
+  // short retraces); bold lines are tripled, small round marks become tacks. o: runMM, weight (auto|single|triple),
+  // retraceMM, minRunMM, declutter, dotMin, stats, gid (run counter, returned updated). Coordinates in mm.
+  function traceLines(lineMask, o) {
+    var N = W * H;
+    o.stats = o.stats || { lines: 0, retraceMM: 0, beanMM: 0, runMM: 0, dots: 0 };
+    var isl1 = islands(lineMask), dots = [];
+    isl1.list.forEach(function (I) {
+      // a small round mark (a star, an eye, a full stop) is sewn as a tack: a few stitches crossed on the spot
+      var bw = I.maxX - I.minX + 1, bh = I.maxY - I.minY + 1;
+      var isDot = I.area >= o.dotMin && Math.max(bw, bh) <= 16 && Math.max(bw, bh) <= 2.2 * Math.min(bw, bh);
+      if (I.area >= 10 && !isDot) return;
+      var sx = 0, sy = 0, n = 0;
+      for (var y = I.minY; y <= I.maxY; y++) for (var x = I.minX; x <= I.maxX; x++) if (isl1.lab[y * W + x] === I.id) { lineMask[y * W + x] = 0; sx += x; sy += y; n++; }
+      if (isDot && n) dots.push([sx / n / PX, sy / n / PX, Math.max(0.45, Math.min(0.9, Math.sqrt(n / Math.PI) / PX))]);
+    });
+    var widthF = edt(lineMask, false), g = skeletonGraph(thin(lineMask)), cl = g.clusters;
+    var br = g.branches.filter(function (b) { return b.pts.length > 1; });
+    // prune spurs (short twigs the thinning grows toward corners) and lone specks
+    for (var pass = 0; pass < 2; pass++) {
+      var deg = cl.map(function () { return 0; });
+      br.forEach(function (b) { if (b.a >= 0) deg[b.a]++; if (b.b >= 0) deg[b.b]++; });
+      br = br.filter(function (b) {
+        if (b.cycle) return b.len >= 6;
+        var freeA = b.a < 0 || deg[b.a] === 1, freeB = b.b < 0 || deg[b.b] === 1;
+        if (freeA && freeB) return b.len >= 8;
+        if (!freeA && !freeB) return true;
+        var j = freeA ? cl[b.b] : cl[b.a];
+        return b.len >= Math.max(4, sampleD(widthF, j.x, j.y) * 1.5);
+      });
+    }
+    // declutter: where lines crowd closer than a thread can keep apart, short strokes that mostly run alongside
+    // another line add only clutter and jumps. Longest first, each stroke claims a band 0.6 mm either side.
+    if (o.declutter !== false) {
+      var occ = new Uint8Array(N), R0 = 6, dropped = 0;
+      br.slice().sort(function (a, b) { return b.len - a.len; }).forEach(function (b) {
+        var n = 0, crowd = 0, ends = 8;
+        if (b.len < 40) {
+          var acc = 0;
+          for (var k = 0; k < b.pts.length; k++) {
+            if (k) acc += Math.hypot(b.pts[k][0] - b.pts[k - 1][0], b.pts[k][1] - b.pts[k - 1][1]);
+            if (acc < ends || b.len - acc < ends) continue;
+            n++; if (occ[Math.round(b.pts[k][1]) * W + Math.round(b.pts[k][0])]) crowd++;
+          }
+          if (n >= 3 && crowd / n > 0.6) { b.drop = true; dropped++; return; }
+        }
+        b.pts.forEach(function (q) {
+          var qx = Math.round(q[0]), qy = Math.round(q[1]);
+          for (var oy = -R0; oy <= R0; oy++) for (var ox = -R0; ox <= R0; ox++) {
+            if (ox * ox + oy * oy > R0 * R0) continue;
+            var xx = qx + ox, yy = qy + oy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) occ[yy * W + xx] = 1;
+          }
+        });
+      });
+      br = br.filter(function (b) { return !b.drop; });
+      o.stats.decluttered = dropped;
+    }
+    // each branch: smoothed centreline in mm, needle points, and how bold the line is
+    br.forEach(function (b) {
+      var p = b.pts.length > 3 ? smoothOpen(resampleOpen(b.pts, 2), 2, 2) : b.pts;
+      b.mm = needlePoints(p.map(function (q) { return [q[0] / PX, q[1] / PX]; }), o.runMM);
+      var wsum = 0; b.pts.forEach(function (q) { wsum += sampleD(widthF, q[0], q[1]); });
+      b.width = 2 * wsum / b.pts.length / PX;
+      b.bold = o.weight === 'triple' || (o.weight === 'auto' && b.width >= 0.65);
+    });
+    // Euler routing: pair up dead ends that are close along the lines and retrace between them, so each network
+    // sews in as few unbroken runs as possible (retracing a short stretch beats a jump and a trim)
+    var edges = [], adj = cl.map(function () { return []; }), trails = [];
+    br.forEach(function (b, bi) {
+      if (b.cycle || b.a < 0 || b.b < 0) { trails.push([{ b: bi, rev: false }]); return; }
+      var e = edges.length; edges.push({ u: b.a, v: b.b, b: bi, len: b.len }); adj[b.a].push(e); adj[b.b].push(e);
+    });
+    var odd = []; adj.forEach(function (l, n) { if (l.length % 2) odd.push(n); });
+    var RETRACE = (o.retraceMM || 6) * PX, pairs = [];
+    odd.forEach(function (s) {
+      var dist = new Map(), via = new Map(), heap = [[0, s]]; dist.set(s, 0);
+      while (heap.length) {
+        var bi = 0; for (var h = 1; h < heap.length; h++) if (heap[h][0] < heap[bi][0]) bi = h;
+        var top = heap.splice(bi, 1)[0], du = top[0], u = top[1];
+        if (du > dist.get(u)) continue;
+        if (u !== s && adj[u].length % 2) pairs.push({ a: s, b: u, d: du, via: via, end: u });
+        adj[u].forEach(function (e) {
+          var E = edges[e], w = E.u === u ? E.v : E.u, nd = du + E.len;
+          if (nd <= RETRACE && (!dist.has(w) || nd < dist.get(w))) { dist.set(w, nd); via.set(w, e); heap.push([nd, w]); }
+        });
+      }
+    });
+    pairs.sort(function (x, y) { return x.d - y.d; });
+    var matched = new Uint8Array(cl.length), nOrig = edges.length;
+    pairs.forEach(function (pr) {
+      if (matched[pr.a] || matched[pr.b]) return;
+      matched[pr.a] = matched[pr.b] = 1;
+      for (var n = pr.end; n !== pr.a;) {
+        var e = pr.via.get(n), E = edges[e], w = E.u === n ? E.v : E.u;
+        var ne = edges.length; edges.push({ u: E.u, v: E.v, b: E.b, len: E.len, dup: true }); adj[E.u].push(ne); adj[E.v].push(ne);
+        o.stats.retraceMM += E.len / PX; n = w;
+      }
+    });
+    // what's still odd is joined by virtual edges (jumps), nearest first, so every network has an Euler circuit
+    var still = []; adj.forEach(function (l, n) { if (l.length % 2) still.push(n); });
+    var usedS = new Uint8Array(cl.length);
+    still.forEach(function (a) {
+      if (usedS[a]) return; usedS[a] = 1;
+      var best = -1, bd = Infinity;
+      still.forEach(function (b) { if (usedS[b]) return; var dd = Math.hypot(cl[a].x - cl[b].x, cl[a].y - cl[b].y); if (dd < bd) { bd = dd; best = b; } });
+      if (best < 0) return; usedS[best] = 1;
+      var ne = edges.length; edges.push({ u: a, v: best, b: -1, virtual: true }); adj[a].push(ne); adj[best].push(ne);
+    });
+    var used = new Uint8Array(edges.length), ptr = new Int32Array(cl.length);
+    for (var sN = 0; sN < cl.length; sN++) {
+      if (ptr[sN] >= adj[sN].length) continue;
+      var stack = [{ n: sN, e: -1 }], circ = [];
+      while (stack.length) {
+        var top2 = stack[stack.length - 1], n2 = top2.n;
+        while (ptr[n2] < adj[n2].length && used[adj[n2][ptr[n2]]]) ptr[n2]++;
+        if (ptr[n2] < adj[n2].length) { var e2 = adj[n2][ptr[n2]]; used[e2] = 1; var E2 = edges[e2]; stack.push({ n: E2.u === n2 ? E2.v : E2.u, e: e2 }); }
+        else circ.push(stack.pop());
+      }
+      circ.reverse(); // node sequence; circ[k].e = edge taken from circ[k-1] to circ[k]
+      var steps = [];
+      for (var k8 = 1; k8 < circ.length; k8++) steps.push({ from: circ[k8 - 1].n, to: circ[k8].n, e: circ[k8].e });
+      var vk = -1; for (var k9 = 0; k9 < steps.length; k9++) if (edges[steps[k9].e].virtual) { vk = k9; break; }
+      if (vk >= 0) steps = steps.slice(vk + 1).concat(steps.slice(0, vk + 1));
+      var cur = [];
+      steps.forEach(function (stp) {
+        var E3 = edges[stp.e];
+        if (E3.virtual) { if (cur.length) trails.push(cur); cur = []; return; }
+        cur.push({ b: E3.b, rev: br[E3.b].a !== stp.from });
+      });
+      if (cur.length) trails.push(cur);
+    }
+    var lines = [], firstPass = new Uint8Array(br.length);
+    var minTrail = o.minRunMM === undefined ? 1.2 : o.minRunMM;
+    trails.forEach(function (tr) {
+      var any = false, tl = 0;
+      tr.forEach(function (seg) { tl += br[seg.b].len / PX; });
+      if (tl < minTrail) { o.stats.dropped = (o.stats.dropped || 0) + 1; return; } // a tick shorter than two stitches isn't worth a jump
+      tr.forEach(function (seg) {
+        var b = br[seg.b], pts = seg.rev ? b.mm.slice().reverse() : b.mm, triple = b.bold && !firstPass[seg.b];
+        firstPass[seg.b] = 1;
+        for (var k = 1; k < pts.length; k++) {
+          var a = pts[k - 1], c = pts[k], L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+          if (L < 1e-6) continue;
+          lines.push([a[0], a[1], c[0], c[1], 6, -1, 0, o.gid]);
+          if (triple) { lines.push([c[0], c[1], a[0], a[1], 6, -1, 0, o.gid], [a[0], a[1], c[0], c[1], 6, -1, 0, o.gid]); o.stats.beanMM += L; }
+          o.stats.runMM += L; any = true;
+        }
+      });
+      if (any) { o.gid++; o.stats.lines++; }
+    });
+    dots.forEach(function (t) {
+      var c = [t[0], t[1]], r = t[2], P = [c, [c[0] + r, c[1]], [c[0] - r, c[1]], [c[0], c[1] + r], [c[0], c[1] - r], c];
+      for (var k = 1; k < P.length; k++) lines.push([P[k - 1][0], P[k - 1][1], P[k][0], P[k][1], 6, -1, 0, o.gid]);
+      o.gid++; o.stats.dots = (o.stats.dots || 0) + 1;
+    });
+    return { lines: lines, br: br, gid: o.gid };
+  }
+  // a 1 mm grid of where a mask is on (for clicking an area that isn't sewn); origin top-left, mm
+  function coarseGrid(m) {
+    var res = 1, gw = Math.ceil(W / PX / res), gh = Math.ceil(H / PX / res), g = new Uint8Array(gw * gh);
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) if (m[y * W + x]) g[Math.floor(y / PX / res) * gw + Math.floor(x / PX / res)] = 1;
+    return { res: res, w: gw, h: gh, data: g };
+  }
+  // a skipped area: its outline (thin, for drawing) and a coarse grid (for picking)
+  function ghostOf(key, color, m) {
+    var inner = erodeMask(m, 2), ring = newMask();
+    for (var q = 0; q < ring.length; q++) if (m[q] && !inner[q]) ring[q] = 1;
+    var tl = traceLines(ring, { runMM: 2, weight: 'single', minRunMM: 0.5, declutter: false, dotMin: 1e9, gid: 0 });
+    return { key: key, color: color, chords: tl.lines.map(function (c) { return [c[0], c[1], c[2], c[3]]; }), grid: coarseGrid(m) };
+  }
   function lineArt(createCanvas, spec, marginMM) {
     var src = spec.source, sw = src.width, sh = src.height;
     var sizePx = Math.max(5, spec.sizeMM || 60) * PX, sc = sizePx / Math.max(sw, sh);
@@ -2485,155 +2655,8 @@ var StitchEngine = (function () {
       // 4. lines: what's left of the ink, traced along its centre
       var grownMass = dilateMask(mass, 1), lineMask = newMask();
       for (var i9 = 0; i9 < N; i9++) if (ink[i9] && !grownMass[i9]) lineMask[i9] = 1;
-      var isl1 = islands(lineMask), dots = [];
-      isl1.list.forEach(function (I) {
-        // a small round mark (a star, an eye, a full stop) is sewn as a tack: a few stitches crossed on the spot
-        var bw = I.maxX - I.minX + 1, bh = I.maxY - I.minY + 1;
-        var isDot = I.area >= dotMin && Math.max(bw, bh) <= 16 && Math.max(bw, bh) <= 2.2 * Math.min(bw, bh);
-        if (I.area >= 10 && !isDot) return;
-        var sx = 0, sy = 0, n = 0;
-        for (var y = I.minY; y <= I.maxY; y++) for (var x = I.minX; x <= I.maxX; x++) if (isl1.lab[y * W + x] === I.id) { lineMask[y * W + x] = 0; sx += x; sy += y; n++; }
-        if (isDot && n) dots.push([sx / n / PX, sy / n / PX, Math.max(0.45, Math.min(0.9, Math.sqrt(n / Math.PI) / PX))]);
-      });
-      var widthF = edt(lineMask, false), g = skeletonGraph(thin(lineMask)), cl = g.clusters;
-      var br = g.branches.filter(function (b) { return b.pts.length > 1; });
-      // prune spurs (short twigs the thinning grows toward corners) and lone specks
-      for (var pass = 0; pass < 2; pass++) {
-        var deg = cl.map(function () { return 0; });
-        br.forEach(function (b) { if (b.a >= 0) deg[b.a]++; if (b.b >= 0) deg[b.b]++; });
-        br = br.filter(function (b) {
-          if (b.cycle) return b.len >= 6;
-          var freeA = b.a < 0 || deg[b.a] === 1, freeB = b.b < 0 || deg[b.b] === 1;
-          if (freeA && freeB) return b.len >= 8;
-          if (!freeA && !freeB) return true;
-          var j = freeA ? cl[b.b] : cl[b.a];
-          return b.len >= Math.max(4, sampleD(widthF, j.x, j.y) * 1.5);
-        });
-      }
-      // declutter: where lines crowd closer than a thread can keep apart, short strokes that mostly run alongside
-      // another line add only clutter and jumps. Longest first, each stroke claims a band 0.6 mm either side.
-      if (spec.declutter !== false) {
-        var occ = new Uint8Array(N), R0 = 6, dropped = 0;
-        br.slice().sort(function (a, b) { return b.len - a.len; }).forEach(function (b) {
-          var n = 0, crowd = 0, ends = 8;
-          if (b.len < 40) {
-            var acc = 0;
-            for (var k = 0; k < b.pts.length; k++) {
-              if (k) acc += Math.hypot(b.pts[k][0] - b.pts[k - 1][0], b.pts[k][1] - b.pts[k - 1][1]);
-              if (acc < ends || b.len - acc < ends) continue;
-              n++; if (occ[Math.round(b.pts[k][1]) * W + Math.round(b.pts[k][0])]) crowd++;
-            }
-            if (n >= 3 && crowd / n > 0.6) { b.drop = true; dropped++; return; }
-          }
-          b.pts.forEach(function (q) {
-            var qx = Math.round(q[0]), qy = Math.round(q[1]);
-            for (var oy = -R0; oy <= R0; oy++) for (var ox = -R0; ox <= R0; ox++) {
-              if (ox * ox + oy * oy > R0 * R0) continue;
-              var xx = qx + ox, yy = qy + oy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) occ[yy * W + xx] = 1;
-            }
-          });
-        });
-        br = br.filter(function (b) { return !b.drop; });
-        stats.decluttered = dropped;
-      }
-      // each branch: smoothed centreline in mm, needle points, and how bold the line is
-      br.forEach(function (b) {
-        var p = b.pts.length > 3 ? smoothOpen(resampleOpen(b.pts, 2), 2, 2) : b.pts;
-        b.mm = needlePoints(p.map(function (q) { return [q[0] / PX, q[1] / PX]; }), runMM);
-        var wsum = 0; b.pts.forEach(function (q) { wsum += sampleD(widthF, q[0], q[1]); });
-        b.width = 2 * wsum / b.pts.length / PX;
-        b.bold = weight === 'triple' || (weight === 'auto' && b.width >= 0.65);
-      });
-      // Euler routing: pair up dead ends that are close along the lines and retrace between them, so each network
-      // sews in as few unbroken runs as possible (retracing a short stretch beats a jump and a trim)
-      var edges = [], adj = cl.map(function () { return []; }), trails = [];
-      br.forEach(function (b, bi) {
-        if (b.cycle || b.a < 0 || b.b < 0) { trails.push([{ b: bi, rev: false }]); return; }
-        var e = edges.length; edges.push({ u: b.a, v: b.b, b: bi, len: b.len }); adj[b.a].push(e); adj[b.b].push(e);
-      });
-      var odd = []; adj.forEach(function (l, n) { if (l.length % 2) odd.push(n); });
-      var RETRACE = (spec.retraceMM || 6) * PX, pairs = [];
-      odd.forEach(function (s) {
-        var dist = new Map(), via = new Map(), heap = [[0, s]]; dist.set(s, 0);
-        while (heap.length) {
-          var bi = 0; for (var h = 1; h < heap.length; h++) if (heap[h][0] < heap[bi][0]) bi = h;
-          var top = heap.splice(bi, 1)[0], du = top[0], u = top[1];
-          if (du > dist.get(u)) continue;
-          if (u !== s && adj[u].length % 2) pairs.push({ a: s, b: u, d: du, via: via, end: u });
-          adj[u].forEach(function (e) {
-            var E = edges[e], w = E.u === u ? E.v : E.u, nd = du + E.len;
-            if (nd <= RETRACE && (!dist.has(w) || nd < dist.get(w))) { dist.set(w, nd); via.set(w, e); heap.push([nd, w]); }
-          });
-        }
-      });
-      pairs.sort(function (x, y) { return x.d - y.d; });
-      var matched = new Uint8Array(cl.length), nOrig = edges.length;
-      pairs.forEach(function (pr) {
-        if (matched[pr.a] || matched[pr.b]) return;
-        matched[pr.a] = matched[pr.b] = 1;
-        for (var n = pr.end; n !== pr.a;) {
-          var e = pr.via.get(n), E = edges[e], w = E.u === n ? E.v : E.u;
-          var ne = edges.length; edges.push({ u: E.u, v: E.v, b: E.b, len: E.len, dup: true }); adj[E.u].push(ne); adj[E.v].push(ne);
-          stats.retraceMM += E.len / PX; n = w;
-        }
-      });
-      // what's still odd is joined by virtual edges (jumps), nearest first, so every network has an Euler circuit
-      var still = []; adj.forEach(function (l, n) { if (l.length % 2) still.push(n); });
-      var usedS = new Uint8Array(cl.length);
-      still.forEach(function (a) {
-        if (usedS[a]) return; usedS[a] = 1;
-        var best = -1, bd = Infinity;
-        still.forEach(function (b) { if (usedS[b]) return; var dd = Math.hypot(cl[a].x - cl[b].x, cl[a].y - cl[b].y); if (dd < bd) { bd = dd; best = b; } });
-        if (best < 0) return; usedS[best] = 1;
-        var ne = edges.length; edges.push({ u: a, v: best, b: -1, virtual: true }); adj[a].push(ne); adj[best].push(ne);
-      });
-      var used = new Uint8Array(edges.length), ptr = new Int32Array(cl.length);
-      for (var sN = 0; sN < cl.length; sN++) {
-        if (ptr[sN] >= adj[sN].length) continue;
-        var stack = [{ n: sN, e: -1 }], circ = [];
-        while (stack.length) {
-          var top2 = stack[stack.length - 1], n2 = top2.n;
-          while (ptr[n2] < adj[n2].length && used[adj[n2][ptr[n2]]]) ptr[n2]++;
-          if (ptr[n2] < adj[n2].length) { var e2 = adj[n2][ptr[n2]]; used[e2] = 1; var E2 = edges[e2]; stack.push({ n: E2.u === n2 ? E2.v : E2.u, e: e2 }); }
-          else circ.push(stack.pop());
-        }
-        circ.reverse(); // node sequence; circ[k].e = edge taken from circ[k-1] to circ[k]
-        var steps = [];
-        for (var k8 = 1; k8 < circ.length; k8++) steps.push({ from: circ[k8 - 1].n, to: circ[k8].n, e: circ[k8].e });
-        var vk = -1; for (var k9 = 0; k9 < steps.length; k9++) if (edges[steps[k9].e].virtual) { vk = k9; break; }
-        if (vk >= 0) steps = steps.slice(vk + 1).concat(steps.slice(0, vk + 1));
-        var cur = [];
-        steps.forEach(function (stp) {
-          var E3 = edges[stp.e];
-          if (E3.virtual) { if (cur.length) trails.push(cur); cur = []; return; }
-          cur.push({ b: E3.b, rev: br[E3.b].a !== stp.from });
-        });
-        if (cur.length) trails.push(cur);
-      }
-      var lines = [], firstPass = new Uint8Array(br.length);
-      var minTrail = spec.minRunMM === undefined ? 1.2 : spec.minRunMM;
-      trails.forEach(function (tr) {
-        var any = false, tl = 0;
-        tr.forEach(function (seg) { tl += br[seg.b].len / PX; });
-        if (tl < minTrail) { stats.dropped = (stats.dropped || 0) + 1; return; } // a tick shorter than two stitches isn't worth a jump
-        tr.forEach(function (seg) {
-          var b = br[seg.b], pts = seg.rev ? b.mm.slice().reverse() : b.mm, triple = b.bold && !firstPass[seg.b];
-          firstPass[seg.b] = 1;
-          for (var k = 1; k < pts.length; k++) {
-            var a = pts[k - 1], c = pts[k], L = Math.hypot(c[0] - a[0], c[1] - a[1]);
-            if (L < 1e-6) continue;
-            lines.push([a[0], a[1], c[0], c[1], 6, -1, 0, gid]);
-            if (triple) { lines.push([c[0], c[1], a[0], a[1], 6, -1, 0, gid], [a[0], a[1], c[0], c[1], 6, -1, 0, gid]); stats.beanMM += L; }
-            stats.runMM += L; any = true;
-          }
-        });
-        if (any) { gid++; stats.lines++; }
-      });
-      dots.forEach(function (t) {
-        var c = [t[0], t[1]], r = t[2], P = [c, [c[0] + r, c[1]], [c[0] - r, c[1]], [c[0], c[1] + r], [c[0], c[1] - r], c];
-        for (var k = 1; k < P.length; k++) lines.push([P[k - 1][0], P[k - 1][1], P[k][0], P[k][1], 6, -1, 0, gid]);
-        gid++; stats.dots = (stats.dots || 0) + 1;
-      });
+      var tl = traceLines(lineMask, { runMM: runMM, weight: weight, retraceMM: spec.retraceMM, minRunMM: spec.minRunMM, declutter: spec.declutter, dotMin: dotMin, stats: stats, gid: gid });
+      var lines = tl.lines, br = tl.br; gid = tl.gid;
 
       if (spec.debugLine) LASTLINE = { W: W, H: H, ink: ink, mass: mass, cls: cls, line: lineMask, br: br };
       return { solid: nSolid > 60 ? solid : null, hatch: hatch, hatchMask: hatchMask, lines: lines, mass: mass };
@@ -2815,7 +2838,68 @@ var StitchEngine = (function () {
       if (spec.recolor) colours.forEach(function (c4, i4) { if (spec.recolor[i4]) c4.color = spec.recolor[i4]; });
     }
 
+    // per-area edits (from the viewport menu): merge one colour into another, change the sewing order, leave an area
+    // out, or sew it as lines or an outline. Keys are the same as the parts' keys ('colour:#hex', 'fill', 'stroke'…).
+    var edits = spec.edits || {}, ghosts = [];
+    function stitchOf(k) { var ed = edits[k]; return (ed && ed.stitch) || 'auto'; }
+    function colKey(c) { return c.role === 'colour' ? 'colour:' + c.color : c.role; }
+    if (spec.merge) colours = colours.filter(function (c) {
+      var to = spec.merge[colKey(c)];
+      if (!to || to === colKey(c)) return true;
+      var t = colours.filter(function (d) { return colKey(d) === to && !spec.merge[to]; })[0];
+      if (!t) return true;
+      var u = new Uint8Array(t.mask); for (var q = 0; q < u.length; q++) if (c.mask[q]) u[q] = 1;
+      t.mask = u; return false;
+    });
+    function byOrder(list, keyFn) {
+      // lines and outlines sit on top of the fills around them, so by default they are sewn last
+      if (!spec.order || !spec.order.length) return list.filter(function (c) { var h = stitchOf(keyFn(c)); return h !== 'line' && h !== 'outline'; })
+        .concat(list.filter(function (c) { var h = stitchOf(keyFn(c)); return h === 'line' || h === 'outline'; }));
+      var rank = {}; spec.order.forEach(function (k, i) { rank[k] = i; });
+      return list.map(function (c, i) { var r = rank[keyFn(c)]; return { c: c, r: r === undefined ? 1000 + i : r }; })
+        .sort(function (a, b) { return a.r - b.r; }).map(function (o) { return o.c; });
+    }
+    colours = byOrder(colours, colKey);
     var S = la ? la.ink : unionMasks(colours.map(function (c5) { return c5.mask; }));
+    // a skipped area keeps its place in the artwork (the design doesn't shift) and is drawn as a faint outline to click
+    colours = colours.filter(function (c) {
+      if (stitchOf(colKey(c)) !== 'skip') return true;
+      ghosts.push(ghostOf(colKey(c), c.color, c.mask)); return false;
+    });
+    // a colour sewn as lines gives the room its thick strokes took back to the colours beside it, so they meet under
+    // the line instead of leaving a strip of bare fabric (wide shapes of that colour stay filled, and keep their room)
+    var lineCols = colours.filter(function (c) { return stitchOf(colKey(c)) === 'line'; });
+    var others = colours.filter(function (c) { return lineCols.indexOf(c) < 0; });
+    if (lineCols.length && others.length) {
+      var NN = W * H, vac = newMask();
+      lineCols.forEach(function (c) {
+        var wd = dilateMask(erodeMask(c.mask, 12), 12);
+        for (var q = 0; q < NN; q++) if (c.mask[q] && !wd[q]) vac[q] = 1;
+      });
+      var lab = new Int16Array(NN).fill(-1), dst = new Uint8Array(NN), qu = new Int32Array(NN), qh = 0, qt = 0;
+      others.forEach(function (c, i) { for (var q = 0; q < NN; q++) if (c.mask[q] && lab[q] < 0) { lab[q] = i; qu[qt++] = q; } });
+      // bare fabric (or a skipped area) on the far side of a line competes too: a fill grows only to the line's middle
+      var nobody = others.length;
+      for (var q0 = 0; q0 < NN; q0++) if (lab[q0] < 0 && !vac[q0]) { lab[q0] = nobody; qu[qt++] = q0; }
+      var grown = others.map(function (c) { return new Uint8Array(c.mask); });
+      while (qh < qt) {
+        var p = qu[qh++], px = p % W, d1 = dst[p] + 1;
+        if (d1 > 18) continue;
+        var nb = [px > 0 ? p - 1 : -1, px < W - 1 ? p + 1 : -1, p - W, p + W];
+        for (var z = 0; z < 4; z++) {
+          var q2 = nb[z]; if (q2 < 0 || q2 >= NN || lab[q2] >= 0 || !vac[q2]) continue;
+          lab[q2] = lab[p]; dst[q2] = d1; if (lab[p] < nobody) grown[lab[p]][q2] = 1; qu[qt++] = q2;
+        }
+      }
+      others.forEach(function (c, i) { c.mask = grown[i]; });
+    }
+    if (la) {
+      la.layers = byOrder(la.layers, function (Ly) { return 'colour:' + Ly.colour; }).filter(function (Ly) {
+        var k = 'colour:' + Ly.colour;
+        if (stitchOf(k) !== 'skip') return true;
+        ghosts.push({ key: k, color: Ly.colour, chords: Ly.lines.concat(Ly.hatch), grid: Ly.solid ? coarseGrid(Ly.solid) : null }); return false;
+      });
+    }
     // each colour reaches 0.4 mm under the colours sewn after it, so they don't gap apart
     for (var ci = 0; ci < colours.length - 1; ci++) {
       var later = unionMasks(colours.slice(ci + 1).map(function (c6) { return c6.mask; }));
@@ -2839,7 +2923,32 @@ var StitchEngine = (function () {
       return { k: k, key: d.key, x: ink.x0 + d.u * (ink.x1 - ink.x0), y: ink.y0 + d.v * (ink.y1 - ink.y0), angle: -d.angle * Math.PI / 180, hit: -1 };
     });
     function partKey(role, color) { return role === 'colour' ? 'colour:' + color : role; }
-    function fillPart(role, color, m, aoFn) {
+    // own: the area's own shape (m may reach a little under its neighbours); lines are traced from the shape itself
+    function fillPart(role, color, m, aoFn, own) {
+      var key = partKey(role, color), how = stitchOf(key);
+      if (how === 'line' || how === 'outline') return lineParts(role, color, own || m, how, aoFn);
+      if (how === 'fill' || how === 'satin') { var keepSF = fillOpts.satinFill; fillOpts.satinFill = how === 'satin'; plainFill(role, color, m, aoFn); fillOpts.satinFill = keepSF; return; }
+      plainFill(role, color, m, aoFn);
+    }
+    // 'line': wide shapes are still filled, the thin strokes are sewn along their centre (tripled where bold);
+    // 'outline': a triple (bean) stitch just inside the edge, the inside left to the fabric
+    function lineParts(role, color, m, how, aoFn) {
+      var N0 = W * H, lm = newMask(), tl;
+      if (how === 'outline') {
+        var inner = erodeMask(m, 3);
+        for (var q = 0; q < N0; q++) if (m[q] && !inner[q]) lm[q] = 1;
+        tl = traceLines(lm, { runMM: spec.runMM || 2.5, weight: 'triple', minRunMM: 1, declutter: false, dotMin: 1e9, gid: 0 });
+      } else {
+        var wide = dilateMask(erodeMask(m, 12), 12), nw = 0;
+        for (var q2 = 0; q2 < N0; q2++) if (wide[q2] && !m[q2]) wide[q2] = 0; else if (wide[q2]) nw++;
+        if (nw > 200) plainFill(role, color, wide, aoFn); else wide = newMask();
+        var grownW = dilateMask(wide, 1);
+        for (var q3 = 0; q3 < N0; q3++) if (m[q3] && !grownW[q3]) lm[q3] = 1;
+        tl = traceLines(lm, { runMM: spec.runMM || 2, weight: 'auto', minRunMM: 1.2, dotMin: 40, gid: 0 });
+      }
+      if (tl.lines.length) parts.push({ role: role, color: color, kind: 'run', sub: 'lines', chords: tl.lines, ao: function () { return 1; } });
+    }
+    function plainFill(role, color, m, aoFn) {
       var key = partKey(role, color);
       fillOpts.dirs = dirsIn.filter(function (d) { return d.key === key; });
       var rf = regionFill(m, fillOpts);
@@ -2847,6 +2956,18 @@ var StitchEngine = (function () {
       parts.push({ role: role, color: color, kind: 'fill', chords: rf.chords, under: rf.under, underIsl: rf.underIsl, report: rf.report, gapsPx: rf.gaps, ao: aoFn });
     }
     function outlinePart(role, color, m, width) {
+      var how = stitchOf(role);
+      if (how === 'skip') return;
+      if (how === 'line' || how === 'outline') {
+        // the edge as a bean stitch along the middle of where the satin would be
+        var band = dilateMask(m, Math.round(width * PX)), lb = newMask();
+        var mid = dilateMask(m, Math.max(1, Math.round(width * PX / 2) - 2));
+        var mid2 = dilateMask(m, Math.round(width * PX / 2) + 2);
+        for (var q = 0; q < lb.length; q++) if (mid2[q] && !mid[q] && band[q]) lb[q] = 1;
+        var tl = traceLines(lb, { runMM: spec.runMM || 2.5, weight: 'triple', minRunMM: 1, declutter: false, dotMin: 1e9, gid: 0 });
+        if (tl.lines.length) parts.push({ role: role, color: color, kind: 'run', sub: 'lines', chords: tl.lines, ao: function () { return 1; } });
+        return;
+      }
       var ol = outlineSatin(m, 0.35 + (spec.pullCompMM || 0) / 4, Math.max(0.4, width - 0.35), Math.max(0.1, spec.strokeSpacingMM || (spec.satinSpacingMM || 0.27) * 0.75), edt(m, true));
       parts.push({ role: role, color: color, kind: 'outline', chords: ol.chords, loops: ol.sewLoops, ao: function () { return 1; } });
     }
@@ -2863,7 +2984,7 @@ var StitchEngine = (function () {
       fillPart(c7.role, c7.color, c7.ext || c7.mask, function (mx, my) {
         var dmm = sampleD(dinS, mx * PX, my * PX) / PX;
         return s1 ? 0.72 + 0.28 * Math.min(1, Math.max(0, (dmm - 0.3) / 1.6)) : 0.86 + 0.14 * Math.min(1, dmm / 1.2);
-      });
+      }, c7.mask);
     });
     // line art: hatching, then the lines on top, in the same thread as any solid ink
     // (dark ink first, then any light ink on a dark ground: each its own thread, solid areas before their lines)
@@ -2873,7 +2994,7 @@ var StitchEngine = (function () {
       if (Ly.lines.length) parts.push({ role: 'colour', color: Ly.colour, kind: 'run', sub: 'lines', chords: Ly.lines, ao: function () { return 1; } });
     });
     // flag stripes: cut the text fill into bands; each band is its own thread, overlapping its neighbours slightly
-    if (spec.kind === 'text' && spec.bands && spec.bands.n > 1) {
+    if (spec.kind === 'text' && spec.bands && spec.bands.n > 1 && colours.length && ['auto', 'fill'].indexOf(stitchOf('fill')) >= 0) {
       var fi = -1;
       parts.forEach(function (p8, i8) { if (p8.role === 'fill') fi = i8; });
       if (fi >= 0) Array.prototype.splice.apply(parts, [fi, 1].concat(spec.bands.mode === 'gradient'
@@ -2883,7 +3004,7 @@ var StitchEngine = (function () {
 
     // bounds -> centre, flip y, mm
     var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
-    parts.forEach(function (p) { p.chords.forEach(function (c) {
+    parts.concat(ghosts).forEach(function (p) { p.chords.forEach(function (c) {
       if (c[0] < minX) minX = c[0]; if (c[2] < minX) minX = c[2]; if (c[0] > maxX) maxX = c[0]; if (c[2] > maxX) maxX = c[2];
       if (c[1] < minY) minY = c[1]; if (c[3] < minY) minY = c[3]; if (c[1] > maxY) maxY = c[1]; if (c[3] > maxY) maxY = c[3];
     }); });
@@ -2929,12 +3050,18 @@ var StitchEngine = (function () {
     // hatching may travel inside its own shaded areas (a stray line there reads as one more hatch stroke)
     if (la) grids = grids.map(function (g0, k) { return parts[k].sub === 'hatch' ? gridOf(dilateMask(parts[k].hatchMask, 2)) : g0; });
     out.forEach(function (o, k) { o.inside = { res: res, x0: -cx, y1: cy, w: gw, h: gh, data: grids[k] }; });
+    var ghostsOut = ghosts.map(function (g) {
+      var o = { key: g.key, color: g.color, chords: g.chords.map(function (c) { return [c[0] - cx, cy - c[1], c[2] - cx, cy - c[3]]; }) };
+      if (g.grid) o.grid = { res: g.grid.res, x0: -cx, y1: cy, w: g.grid.w, h: g.grid.h, data: g.grid.data };
+      return o;
+    });
     var stitchCount = out.reduce(function (a, p) { return a + p.chords.length; }, 0);
-    var dbg = spec.debugMask ? { W: W, H: H, PX: PX, cx: cx, cy: cy, mask: Uint8Array.from(colours[0].mask), stats: LAST,
+    var dbg = spec.debugMask ? { W: W, H: H, PX: PX, cx: cx, cy: cy, mask: colours.length ? Uint8Array.from(colours[0].mask) : newMask(), stats: LAST,
       cols: (LAST.cols || []).map(function (c) { return c.pts.map(function (q) { return [q[0] / PX - cx, cy - q[1] / PX]; }); }) } : undefined;
     return {
       debug: dbg,
       parts: out,
+      ghosts: ghostsOut,
       size: { w: maxX - minX, h: maxY - minY },
       inside: { res: res, x0: -cx, y1: cy, w: gw, h: gh, data: grid },
       // the artwork's ink box (result mm, y up), for placing direction handles; and where each direction landed

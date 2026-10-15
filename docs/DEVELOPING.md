@@ -15,9 +15,10 @@ design and every imported picture); autosave and version history live in Indexed
     studio/                  the app and the stitch engine (plain JavaScript, no framework)
       src/engine.js          masks → islands → tatami / satin / outline chords, underlay, swoops, travel grids
                              line art: ink vs. paper, skeleton → Euler-routed running stitch, tone → hatching
+                             per-area edits (spec.edits / order / merge): Lines, Outline, Satin, Flat fill, Skip
       src/export.js          sewing order (left-to-right sweep), travel routing, EXP / INF / JEF / DST / PES / VP3 / XXX / BMP writers, zip
       src/machines.js        machine catalogue: models, hoops, file format, trimming, speed (searchable from the top bar)
-      src/app_*.js           UI: core state + palettes, threads, 3D scene, direction tool, tips, panels, export & bake,
+      src/app_*.js           UI: core state + palettes, threads, 3D scene, direction tool, tips, panels, pie menu, export & bake,
                              projects (save / open / autosave / versions), boot
       src/index.html         page template and CSS
       src/assets.gen.js      generated: fonts, themes, thread charts, packed emoji (from build_assets.py)
@@ -27,7 +28,7 @@ design and every imported picture); autosave and version history live in Indexed
       build_assets.py        builds assets.gen.js and fonts.json from node_modules/@fontsource and the palettes
       tools/build_emoji.py   builds emoji.json / emoji.pack.json from Twemoji 17 + emojibase 17
       build.py               assembles dist/artifact.html, dist/test/index.html and ../desktop/app/
-      test/                  engine tests (t_*.mjs), quality harness, headless UI test (ui.py)
+      test/                  engine tests (t_*.mjs), quality harness, headless UI tests (ui.py, ui_pie.py)
       vendor/inkstitch-palettes   thread charts (GPL-3.0, with licence)
     desktop/                 Electron shell (main.js, preload.js), icons
     studio/assets/brand/     app icon sources (SVG) and renders
@@ -66,10 +67,12 @@ the repository itself).
     node test/trace_jumps.mjs <emoji code | font:Family:Text | img:path>   # every jump of one design, for debugging
     node test/t_lineart.mjs <image> [sizeMM] [crop] [key=value]       # line-art mode: metrics + source | stitches picture
     LINE=1 DIR=test/line_images node test/stress.mjs images           # line-art sweep (synthetic drawings are in the repo)
+    node test/t_edits.mjs <image> [sizeMM]                     # per-area edits (Lines, Outline, skip, order, edge, merge) side by side
 
 The image sweep reads test/stress_images/ (not in the repo: add your own public-domain paintings and clipart).
     node test/quality.mjs         # stitch-quality harness (coverage, show-through, crossings, edge angles)
     python3 test/ui.py            # headless browser run of the whole app (needs Playwright + Chromium)
+    python3 test/ui_pie.py        # the click-a-shape pie menu, on test/stickers/sticker-strawberry.png
 
 ## Third-party material
 

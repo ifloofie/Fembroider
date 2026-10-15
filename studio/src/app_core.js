@@ -215,6 +215,13 @@
     if (L.colors.bands === undefined) L.colors.bands = null;
     L.thread = L.thread === 'auto' || THREADTYPE[L.thread] ? L.thread : 'auto';
     if (!Array.isArray(L.dirs)) L.dirs = [];
+    // per-area overrides from the pie menu (saved before 0.17 they don't exist)
+    var KEY = /^(colour:#[0-9a-f]{6}|fill|stroke|stroke2|shadow)$/, HOW = ['satin', 'fill', 'line', 'outline', 'skip'];
+    var ed = {}; if (L.edits && typeof L.edits === 'object') Object.keys(L.edits).forEach(function (k) { var v = L.edits[k]; if (KEY.test(k) && v && HOW.indexOf(v.stitch) >= 0) ed[k] = { stitch: v.stitch }; });
+    L.edits = ed;
+    L.order = Array.isArray(L.order) ? L.order.filter(function (k) { return typeof k === 'string' && KEY.test(k); }) : [];
+    var mg = {}; if (L.merge && typeof L.merge === 'object') Object.keys(L.merge).forEach(function (k) { if (KEY.test(k) && typeof L.merge[k] === 'string' && KEY.test(L.merge[k]) && L.merge[k] !== k) mg[k] = L.merge[k]; });
+    L.merge = mg;
     if (L.type === 'text') {
       if (typeof L.p.tail !== 'string') L.p.tail = L.p.tail ? 'classic' : 'none'; // saved before swoop styles
       if (!(L.p.tailWeight > 0)) L.p.tailWeight = 1;
@@ -301,7 +308,8 @@
     var e = effStitch(L);
     var base = { fillMode: e.fillMode, spacingMM: e.tatamiSpacing, satinSpacingMM: e.satinSpacing, strokeSpacingMM: e.strokeSpacing, satinFill: !!doc.stitch.satin, tatamiSpacingMM: e.tatamiSpacing, tatamiStitchMM: e.tatamiStitch,
       pullCompMM: e.pullComp, satinMaxMM: e.satinMax, splitMM: e.split, underlay: e.underlay, tatamiAngleDeg: e.tatamiAngle, threadMM: e.R.width, effects: effectsSpec(L),
-      dirs: (L.dirs || []).map(function (d) { return { key: d.key, u: d.u, v: d.v, angle: d.angle }; }) };
+      dirs: (L.dirs || []).map(function (d) { return { key: d.key, u: d.u, v: d.v, angle: d.angle }; }),
+      edits: L.edits && Object.keys(L.edits).length ? L.edits : undefined, order: L.order && L.order.length ? L.order : undefined, merge: L.merge && Object.keys(L.merge).length ? L.merge : undefined };
     if (L.type === 'text') {
       var f = FONT[L.p.font] || A.fonts[0];
       return Object.assign(base, { kind: 'text', text: L.p.text || ' ', family: '"' + f.family + '"', weight: f.weight === 400 ? undefined : String(f.weight),

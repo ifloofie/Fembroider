@@ -19,6 +19,8 @@
   colours for you, or keeps the colours of an SVG.
 - **Three ways to stitch a picture.** *Flat art* for logos, *Painting* for paintings and photos, *Line art* for
   drawings and engravings (examples below).
+- **Fine-tune any part by clicking it.** Click a shape in the preview and a round menu opens right there: sew
+  it as lines or an outline, leave it out, change its colour or stitch direction, or move it earlier in the order.
 - **See it in 3D before you sew.** Every stitch is drawn in a real hoop on a real fabric, with the thread's sheen.
   Press *Play* to watch it stitch out in order.
 - **Get the file your machine reads.** Choose your machine from the list and Fembroider saves the right kind of
@@ -75,6 +77,27 @@ on dark fabric.
 <sub>Plates from the British Library's digitised books: "Head and Nucleus of Comet, 1811" and "Encke's Comet", each at 10 cm.</sub>
 
 All the artworks shown are in the public domain.
+
+## Click to fine-tune
+
+Fembroider does its best automatically, but you know your design better. **Click any shape** in the preview and a
+round menu opens where you clicked, with everything you can change about that part. Drag a shape to move it.
+
+<p align="center"><img src="docs/images/pie-menu.jpg" width="530" alt="Clicking the black outline of a strawberry sticker opens a round menu: Sew as, Direction, Colour, Sew order, Merge into, Leave out, Sticker edge and Layer"></p>
+
+- **Sew as…** Auto, Satin, Flat fill, *Lines* (thin strokes become a single or triple running stitch along their
+  middle, great for the linework of a drawing) or *Outline* (just the edge).
+- **Leave out** a colour, for example a white border that the fabric can show instead. It stays as a faint dotted
+  outline in the preview, so you can click it and bring it back.
+- **Colour**, **Direction** of the stitches, **Sew order** and **Merge into** another colour (one less thread change).
+- **Sticker edge** adds a satin or bean-stitch border round the whole design, like a die-cut sticker.
+
+Made for designs drawn in Procreate and similar apps: export your sticker as a PNG with a transparent background
+and import it.
+
+![A strawberry sticker drawn as a PNG, stitched four ways: automatically; with the black linework sewn as lines and the white border left out; and with a bean-stitch edge](docs/images/sticker-edits.jpg)
+
+Every change is undoable and saved with your project, and it stays put when you resize the design.
 
 ## Works with your machine
 

@@ -210,9 +210,9 @@
     $('playbar').hidden = s !== 'stitch';
     if (s !== 'stitch') { ui.playing = false; ui.bench = false; if (ui.sew < 1) { ui.sew = 1; applySew(); } refreshPlay(); }
     $('hint').textContent = s === 'design'
-      ? 'Drag a layer to move it · Right-drag or drag empty space: orbit · Middle or Shift-drag: pan · Scroll: zoom'
+      ? 'Click a shape for options · Drag a layer to move it · Right-drag or drag empty space: orbit · Middle or Shift-drag: pan · Scroll: zoom'
       : 'Right-drag or drag: orbit · Middle or Shift-drag: pan · Scroll: zoom · Double-click: reset view';
-    closePop();
+    closePop(); closePie(); doc.layers.forEach(placeLayer);
     rebuildCopies(); buildGizmo(); scheduleShadow();
     renderPanel(); refreshToolPanel(); updateAction();
     if (was !== s && ui.copies > 1 && (was === 'stitch' || s === 'stitch')) goTo(ui.view === 'custom' ? '3d' : ui.view);
@@ -274,17 +274,31 @@
   function recolorHtml(L) {
     var r = rt(L.id);
     if (!r.result) return '<p class="note">Colours appear once the layer is stitched.</p>';
-    var seen = {}, rows = '';
+    var seen = {}, rows = '', n = 0, ks = sewKeys(L), multi = ks.length > 1;
+    function badge(key) {
+      var how = stitchOfKey(L, key), i = ks.indexOf(key);
+      var t = how === 'skip' ? 'Left out' : how !== 'auto' ? STITCH_NAME[how] : '';
+      return (t ? '<span class="areabadge' + (how === 'skip' ? ' off' : '') + '">' + t + '</span>' : '') + (multi && L.order && L.order.length && i >= 0 ? '<span class="areabadge off" title="Sewing order">' + (i + 1) + '</span>' : '');
+    }
     r.result.parts.forEach(function (p) {
       if (p.role !== 'colour' || seen[p.color]) return;
-      seen[p.color] = 1;
+      seen[p.color] = 1; n++;
       var cur = partColor(L, p);
-      rows += '<button type="button" class="swatchbtn" data-recolor="' + p.color + '" data-title="Recolour" aria-label="Recolour ' + p.color + '"><span class="sw" style="background:' + cur + '"></span><span class="nm">' + threadLabel(cur) + '</span></button>';
+      rows += '<button type="button" class="swatchbtn" data-recolor="' + p.color + '" data-title="Recolour" aria-label="Recolour ' + p.color + '"><span class="sw" style="background:' + cur + '"></span><span class="nm">' + threadLabel(cur) + '</span>' + badge(p.key) + '</button>';
     });
+    (r.result.ghosts || []).forEach(function (g) {
+      if (!/^colour:/.test(g.key) || seen[g.color]) return;
+      seen[g.color] = 1; n++;
+      var cur = ghostColour(L, g);
+      rows += '<button type="button" class="swatchbtn skipped" data-recolor="' + g.color + '" data-title="Recolour" aria-label="Recolour ' + g.color + ' (left out)"><span class="sw" style="background:' + cur + '"></span><span class="nm">' + threadLabel(cur) + '</span>' + badge(g.key) + '</button>';
+    });
+    var merged = Object.keys(L.merge || {}).length;
     var any = Object.keys(L.colors.recolor || {}).length;
-    return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' + rows + '</div>' +
+    return '<div style="display:grid;grid-template-columns:' + (hasAreaEdits(L) ? '1fr' : '1fr 1fr') + ';gap:6px">' + rows + '</div>' +
       (r.result.meta && r.result.meta.bgRemoved ? '<p class="note">Background ' + r.result.meta.bgRemoved + ' removed.</p>' : '') +
-      (any ? '<div class="btnrow"><button type="button" class="btn sm" data-act="reset-colours">Reset colours</button></div>' : '');
+      (merged ? '<p class="note">' + merged + ' colour' + (merged > 1 ? 's' : '') + ' merged into ' + (merged > 1 ? 'others' : 'another') + '.</p>' : '') +
+      (n ? '<p class="note">Click a shape in the view to change how it’s sewn, leave it out, or change the order.</p>' : '') +
+      (any || hasAreaEdits(L) ? '<div class="btnrow">' + (any ? '<button type="button" class="btn sm" data-act="reset-colours">Reset colours</button>' : '') + (hasAreaEdits(L) ? '<button type="button" class="btn sm" data-act="reset-areas">Reset areas</button>' : '') + '</div>' : '');
   }
   // swoop (swash tail) styles, each with a small drawing of its shape
   var SWOOPS = [
@@ -1181,6 +1195,7 @@
             toast('Cropped to the picture · adjust with the sliders');
           }, function () { renderPanel(); toast('Couldn’t read the picture to crop it.'); });
           return;
+        case 'reset-areas': resetAreas(L); return;
         case 'reset-colours': L.colors.recolor = {}; recolorLayer(L); refreshLayerRow(L.id); renderPanel(); scheduleSequence(); commit(); return;
         case 'theme': applyThemeTo(act.dataset.v); return;
         case 'flag': ui.prideFlag = act.dataset.v; applyThemeTo(A.themes.filter(function (t) { return t.flag === act.dataset.v; })[0].name); return;
@@ -1414,7 +1429,8 @@
   var pointers = new Map(), gesture = null;
   canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   canvas.addEventListener('pointerdown', function (e) {
-    canvas.focus({ preventScroll: true }); closePop();
+    var hadPie = !!pie;
+    canvas.focus({ preventScroll: true }); closePop(); closePie();
     try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
     anim = null;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1425,7 +1441,7 @@
       return;
     }
     if (e.button === 1 || (e.button === 0 && e.shiftKey)) { gesture = { mode: 'pan' }; e.preventDefault(); return; }
-    if (e.button === 2) { gesture = { mode: 'orbit' }; return; }
+    if (e.button === 2) { var h2 = ui.stage === 'design' && !hadPie ? planeHit(e.clientX, e.clientY) : null, P2 = h2 ? pickLayer(h2) : null; gesture = { mode: 'orbit', click: !!P2, sx: e.clientX, sy: e.clientY, pieL: P2, hit: h2 }; return; }
     var hit = planeHit(e.clientX, e.clientY);
     if (ui.stage === 'design' && hit) {
       var S = selLayer();
@@ -1438,12 +1454,12 @@
       var P = pickLayer(hit);
       if (P) {
         if (doc.sel !== P.id) selectLayer(P.id);
-        if (!P.locked) { gesture = { mode: 'move', L: P, hx: hit[0], hy: hit[1], ox: P.tf.x, oy: P.tf.y }; canvas.className = 'cur-move'; }
-        else gesture = { mode: 'orbit' };
+        if (!P.locked) { gesture = { mode: 'move', L: P, hx: hit[0], hy: hit[1], ox: P.tf.x, oy: P.tf.y, sx: e.clientX, sy: e.clientY, t0: performance.now(), pie: !hadPie }; canvas.className = 'cur-move'; }
+        else gesture = { mode: 'orbit', click: true, sx: e.clientX, sy: e.clientY, pieL: hadPie ? null : P, hit: hit };
         return;
       }
     }
-    gesture = { mode: 'orbit', click: e.button === 0, sx: e.clientX, sy: e.clientY };
+    gesture = { mode: 'orbit', click: e.button === 0 && !hadPie, sx: e.clientX, sy: e.clientY };
   });
   canvas.addEventListener('pointermove', function (e) {
     var p = pointers.get(e.pointerId);
@@ -1506,8 +1522,21 @@
     pointers.delete(e.pointerId);
     if (pointers.size === 0) {
       if (gesture && gesture.mode === 'dir') { dirPointerUp(); return; }
+      // a click (not a drag) on a layer opens the pie menu there
+      if (gesture && gesture.mode === 'move' && gesture.pie && Math.hypot(e.clientX - gesture.sx, e.clientY - gesture.sy) < 5 && performance.now() - gesture.t0 < 700) {
+        var gL = gesture.L, gh = [gesture.hx, gesture.hy];
+        if (gesture.changed) { gL.tf.x = gesture.ox; gL.tf.y = gesture.oy; placeLayer(gL); sceneChanged(); }
+        canvas.className = ''; gesture = null;
+        if (doc.sel !== gL.id) selectLayer(gL.id);
+        openPie(e.clientX, e.clientY, gL, gh); return;
+      }
+      if (gesture && gesture.mode === 'orbit' && gesture.click && gesture.pieL) {
+        var oL = gesture.pieL, oh = gesture.hit; gesture = null;
+        if (doc.sel !== oL.id) selectLayer(oL.id);
+        openPie(e.clientX, e.clientY, oL, oh); return;
+      }
       if (gesture && gesture.L) endEdit();
-      else if (gesture && gesture.mode === 'orbit' && gesture.click && ui.stage === 'design' && doc.sel) { doc.sel = null; buildGizmo(); renderPanel(); refreshToolPanel(); }
+      else if (gesture && gesture.mode === 'orbit' && gesture.click && !gesture.pieL && ui.stage === 'design' && doc.sel) { doc.sel = null; buildGizmo(); renderPanel(); refreshToolPanel(); }
       gesture = null;
     } else if (gesture && gesture.mode === 'pinch') gesture = { mode: 'orbit' };
   }
@@ -1515,7 +1544,7 @@
   canvas.addEventListener('pointercancel', endPointer);
   canvas.addEventListener('auxclick', function (e) { if (e.button === 1) e.preventDefault(); });
   canvas.addEventListener('wheel', function (e) {
-    e.preventDefault(); anim = null;
+    e.preventDefault(); anim = null; closePie();
     var dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
     zoomAt(Math.exp(dy * 0.0012), e.clientX, e.clientY);
     markCustomView(); requestDraw();

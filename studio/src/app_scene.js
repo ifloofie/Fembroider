@@ -154,6 +154,14 @@
     if (!r.mat) r.mat = makeThreadMat();
     var mesh = new THREE.Mesh(g, r.mat); mesh.frustumCulled = false;
     var grp = new THREE.Group(); grp.add(mesh);
+    // areas left out: a faint dashed outline, so they can still be clicked and brought back
+    if (r.result.ghosts && r.result.ghosts.length) {
+      var gp = [];
+      r.result.ghosts.forEach(function (gh) { gh.chords.forEach(function (c) { gp.push(c[0], c[1], 0.05, c[2], c[3], 0.05); }); });
+      var gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.Float32BufferAttribute(gp, 3));
+      var gl2 = new THREE.LineSegments(gg, new THREE.LineDashedMaterial({ color: accentHex(0.1), transparent: true, opacity: 0.8, dashSize: 0.9, gapSize: 0.7, depthTest: false }));
+      gl2.computeLineDistances(); gl2.renderOrder = 5; gl2.userData.ghost = true; grp.add(gl2); r.ghostLines = gl2;
+    } else r.ghostLines = null;
     r.group = grp; r.mesh = mesh; r.count = n;
     layerRoot.add(grp);
     placeLayer(L);
@@ -161,7 +169,12 @@
   function recolorLayer(L) {
     var r = rt(L.id); if (!r.mesh || !r.result) return;
     var C = r.mesh.geometry.getAttribute('iCol'), k = 0;
-    r.result.parts.forEach(function (p) { var col = lin(partColor(L, p)); p.chords.forEach(function () { C.setXYZ(k++, col[0], col[1], col[2]); }); });
+    var foc = ui.pieFocus && ui.pieFocus.id === L.id ? ui.pieFocus.key : null;
+    r.result.parts.forEach(function (p) {
+      var col = lin(partColor(L, p));
+      if (foc && (p.role === 'band' ? 'fill' : p.key) !== foc) col = [col[0] * 0.28 + 0.1, col[1] * 0.28 + 0.1, col[2] * 0.28 + 0.1];
+      p.chords.forEach(function () { C.setXYZ(k++, col[0], col[1], col[2]); });
+    });
     C.needsUpdate = true;
     var Mi = r.mesh.geometry.getAttribute('iMisc'), code = THREADTYPE[layerMaterial(L)].code;
     if (Mi.getZ(0) !== code) { for (var i = 0; i < Mi.count; i++) Mi.setZ(i, code); Mi.needsUpdate = true; }
@@ -174,6 +187,7 @@
     r.group.rotation.set(0, 0, L.tf.rot * Math.PI / 180);
     r.group.scale.set((L.tf.mx ? -1 : 1) * s, (L.tf.my ? -1 : 1) * s, 1);
     r.group.visible = L.visible;
+    if (r.ghostLines) r.ghostLines.visible = ui.stage === 'design';
   }
   // after undo/redo or structural changes: drop meshes of deleted layers, re-place, re-render
   function syncScene() {
