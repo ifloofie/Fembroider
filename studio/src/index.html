@@ -228,6 +228,10 @@ details.sec > summary .meta + .chev { margin-left: 8px; }
 .note.suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink); }
 .btn.sm { height: 30px; padding: 0 11px; font-size: 13px; }
 .seg.grid2 { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+.cropwrap { display: flex; justify-content: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.cropview { position: relative; display: inline-block; overflow: hidden; line-height: 0; }
+.cropview img { display: block; max-width: 100%; max-height: 220px; }
+.cropview i { position: absolute; outline: 2px solid var(--primary); box-shadow: 0 0 0 9999px rgba(10, 14, 22, .5); pointer-events: none; }
 #artBox { display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
 input[type=range] { accent-color: var(--primary); }
 input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--primary); }

@@ -23,7 +23,7 @@ const seq = X.buildSequence([{ name: 'x', result: r, transform: { x: 0, y: 0, ro
 const st = r.meta.lineArt;
 console.log(path.basename(file), SIZE + 'mm', 'render', Math.round(tR) + 'ms', 'parts', r.parts.map(p => (p.sub || p.kind) + ':' + p.chords.length).join(' '),
   '| stitches', seq.stats.stitches, 'jumps', seq.stats.jumps, 'travels', seq.stats.travels, 'min', seq.stats.minutes.toFixed(1),
-  '| runs', st.lines, 'hatchAreas', st.hatchAreas, 'retrace', st.retraceMM.toFixed(0) + 'mm', 'bean', st.beanMM.toFixed(0) + 'mm', 'line', st.runMM.toFixed(0) + 'mm', 'ink', r.parts[0] && r.parts[0].color);
+  '| runs', st.lines, 'hatchAreas', st.hatchAreas, 'retrace', st.retraceMM.toFixed(0) + 'mm', 'bean', st.beanMM.toFixed(0) + 'mm', 'line', st.runMM.toFixed(0) + 'mm', 'ink', [...new Set(r.parts.map(p => p.color))].join('+'), 'dots', st.dots, 'lightGround', (st.lightGround || 0).toFixed(2));
 // picture: source and stitches at the same scale
 const bd = seq.bounds, w = Math.ceil(bd.w * S) + 20, h = Math.ceil(bd.h * S) + 20;
 const out = createCanvas(w * 2, h), x = out.getContext('2d');

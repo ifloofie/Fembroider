@@ -226,6 +226,9 @@
       if (['hatch', 'solid', 'none'].indexOf(L.p.shading) < 0) L.p.shading = 'hatch';
       if (!(L.p.ink >= 0.2 && L.p.ink <= 0.7)) L.p.ink = 0.4;
       if (!(L.p.runLen >= 1.5 && L.p.runLen <= 3.5)) L.p.runLen = 2;
+      if (['auto', 'dark', 'light'].indexOf(L.p.polarity) < 0) L.p.polarity = 'auto';
+      var cr = L.p.crop && typeof L.p.crop === 'object' ? L.p.crop : {};
+      L.p.crop = {}; ['l', 't', 'r', 'b'].forEach(function (k) { var v = +cr[k]; L.p.crop[k] = v >= 0 && v <= 45 ? Math.round(v) : 0; });
     }
     return L;
   }
@@ -258,7 +261,7 @@
     var t = THEME[doc.theme] || A.themes[0];
     var fx = defaultFx(); fx.stroke.on = false;
     return { id: newId(), type: 'image', name: name, visible: true, locked: false, thread: 'auto', dirs: [],
-      tf: { x: 0, y: 0, rot: 0, mx: false, my: false }, p: { src: srcId, size: sizeMM, maxColors: 5, blur: 0.6, art: 'auto', removeBg: true, palette: 'svg', lineWeight: 'auto', shading: 'hatch', ink: 0.4, runLen: 2 },
+      tf: { x: 0, y: 0, rot: 0, mx: false, my: false }, p: { src: srcId, size: sizeMM, maxColors: 5, blur: 0.6, art: 'auto', removeBg: true, palette: 'svg', lineWeight: 'auto', shading: 'hatch', ink: 0.4, runLen: 2, polarity: 'auto', crop: { l: 0, t: 0, r: 0, b: 0 } },
       colors: themeColors(t), fx: fx };
   }
 
@@ -317,10 +320,11 @@
       if (!src.palette) { try { src.palette = E.parseSvgPalette(src.svg); } catch (e) { src.palette = []; } }
       if (src.palette.length) { o.palette = src.palette; delete o.maxColors; }
     }
+    if (hasCrop(L)) o.crop = [L.p.crop.l, L.p.crop.t, L.p.crop.r, L.p.crop.b];
     // line art: one thread, the ink; thin lines become running stitch, fine shading hatching
     if (L.p.art === 'line') {
       delete o.maxColors; delete o.blurMM; delete o.graphic;
-      Object.assign(o, { lineArt: true, lineWeight: L.p.lineWeight || 'auto', shading: L.p.shading || 'hatch', inkLevel: L.p.ink || 0.4, runMM: L.p.runLen || 2 });
+      Object.assign(o, { lineArt: true, lineWeight: L.p.lineWeight || 'auto', shading: L.p.shading || 'hatch', inkLevel: L.p.ink || 0.4, runMM: L.p.runLen || 2, inkPolarity: L.p.polarity || 'auto' });
     }
     return o;
   }
@@ -350,13 +354,28 @@
     }
     var s = SOURCES.get(L.p.src);
     if (!s) return Promise.reject(new Error('Image source missing'));
+    var whole;
     if (s.kind === 'svg') {
       var k2 = 's:' + L.p.src + ':' + px;
       if (!BITMAPS.has(k2)) BITMAPS.set(k2, svgBitmap(s.svg, px));
-      return BITMAPS.get(k2);
+      whole = BITMAPS.get(k2);
+    } else whole = Promise.resolve(s.bitmap);
+    if (!hasCrop(L)) return whole;
+    // cropped: only the kept part of the picture reaches the stitch engine (and Size applies to that part)
+    var c = L.p.crop, k3 = 'c:' + L.p.src + ':' + (s.kind === 'svg' ? px : 'b') + ':' + [c.l, c.t, c.r, c.b].join(',');
+    if (!BITMAPS.has(k3)) {
+      // keep only the last few crops of each picture (a slider drag makes many)
+      var mine = []; BITMAPS.forEach(function (v, key) { if (key.indexOf('c:' + L.p.src + ':') === 0) mine.push(key); });
+      mine.slice(0, Math.max(0, mine.length - 4)).forEach(function (key) { BITMAPS.delete(key); });
     }
-    return Promise.resolve(s.bitmap);
+    if (!BITMAPS.has(k3)) BITMAPS.set(k3, whole.then(function (bm) {
+      var w = bm.width, h = bm.height, sx = Math.round(w * c.l / 100), sy = Math.round(h * c.t / 100);
+      var sw = Math.max(8, Math.round(w * (100 - c.l - c.r) / 100)), sh = Math.max(8, Math.round(h * (100 - c.t - c.b) / 100));
+      return createImageBitmap(bm, sx, sy, sw, sh);
+    }));
+    return BITMAPS.get(k3);
   }
+  function hasCrop(L) { var c = L.type === 'image' && L.p.crop; return !!(c && (c.l || c.t || c.r || c.b)); }
 
   function requestRender(L) {
     var r = rt(L.id), spec = specOf(L), key = keyOf(spec);

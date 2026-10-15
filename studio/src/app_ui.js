@@ -69,6 +69,7 @@
     }
     if (k === 'L.thread') { recolorLayer(L); requestRender(L); renderPanelSoon(); return; }
     if (k.indexOf('L.fx.stripes') === 0) doc.theme = '';
+    if (k.indexOf('L.p.crop.') === 0) { var cb = $('cropBox'); if (cb) cb.setAttribute('style', cropStyle(L.p.crop)); }
     if (k.indexOf('L.') === 0) { debounceRender(L); return; }
     if (k.indexOf('doc.stitch') === 0) { clearTimeout(allTimer); allTimer = setTimeout(renderAllLayers, 300); return; }
     if (k.indexOf('doc.threads') === 0) {
@@ -342,9 +343,60 @@
     return sec('layer', 'image', 'Imported art', esc(kind), locked +
       '<div style="display:flex;gap:12px;align-items:center">' + (s.thumb ? '<img alt="" src="' + s.thumb + '" style="width:56px;height:56px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#fff">' : '') +
       '<div style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.name || L.name) + '</b><span class="note">' + kind + '</span></div></div>' +
-      rangeRow('Size', 'L.p.size', 15, 190, 1, 0, ' mm') + threadHtml(L) +
+      rangeRow('Size', 'L.p.size', 15, 190, 1, 0, ' mm') + threadHtml(L) + (s.thumb ? cropHtml(L, s) : '') +
       sub('art', 'Artwork & stitching', esc({ auto: 'Auto', flat: 'Flat art', painting: 'Painting', line: 'Line art' }[L.p.art] || 'Auto'), '<div id="artBox">' + imageArtHtml(L, isSvg) + '</div>', true) +
       '<div class="lab" style="font-size:13.5px">Thread colours</div><div id="recolorBox">' + recolorHtml(L) + '</div>');
+  }
+  // cropping an imported picture: trim page text, borders and margins around a scanned illustration
+  function cropStyle(c) { return 'left:' + c.l + '%;top:' + c.t + '%;right:' + c.r + '%;bottom:' + c.b + '%'; }
+  function cropHtml(L, s) {
+    var c = L.p.crop || { l: 0, t: 0, r: 0, b: 0 }, on = !!(c.l || c.t || c.r || c.b), NAME = { l: 'left', t: 'top', r: 'right', b: 'bottom' };
+    var meta = on ? ['l', 't', 'r', 'b'].filter(function (k) { return c[k]; }).map(function (k) { return NAME[k] + ' ' + c[k] + '%'; }).join(' · ') : 'whole picture';
+    var dis = L.locked ? { disabled: true } : {};
+    return sub('crop', 'Crop', esc(meta),
+      '<div class="cropwrap"><div class="cropview"><img alt="Picture, with the kept part outlined" src="' + s.thumb + '"><i id="cropBox" style="' + cropStyle(c) + '"></i></div></div>' +
+      rangeRow('Left', 'L.p.crop.l', 0, 45, 1, 0, '%', dis) + rangeRow('Right', 'L.p.crop.r', 0, 45, 1, 0, '%', dis) +
+      rangeRow('Top', 'L.p.crop.t', 0, 45, 1, 0, '%', dis) + rangeRow('Bottom', 'L.p.crop.b', 0, 45, 1, 0, '%', dis) +
+      '<div class="btnrow"><button type="button" class="btn sm" data-act="crop-auto"' + (L.locked ? ' disabled' : '') + '>Find the picture</button>' +
+      (on ? '<button type="button" class="btn sm" data-act="crop-reset"' + (L.locked ? ' disabled' : '') + '>Show it all</button>' : '') + '</div>' +
+      '<p class="note">Trim page text, borders or margins off a scanned picture. <b>Find the picture</b> picks the main illustration for you. Size applies to the part you keep.</p>', on);
+  }
+  // the main picture on a scanned page: the biggest, densest block of marks once nearby strokes are joined up
+  function findPictureCrop(L) {
+    var s = SOURCES.get(L.p.src); if (!s) return Promise.reject(new Error('missing'));
+    return (s.kind === 'svg' ? svgBitmap(s.svg, 400) : Promise.resolve(s.bitmap)).then(function (bm) {
+      var k = 300 / Math.max(bm.width, bm.height), w = Math.max(8, Math.round(bm.width * k)), h = Math.max(8, Math.round(bm.height * k));
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      var x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(bm, 0, 0, w, h);
+      var d = x.getImageData(0, 0, w, h).data, n = w * h, lum = new Float32Array(n), vals = [];
+      for (var i = 0; i < n; i++) { lum[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]; vals.push(lum[i]); }
+      vals.sort(function (a, b) { return a - b; });
+      var paper = vals[Math.floor(n * 0.9)], m = new Uint8Array(n), cnt = 0;
+      for (var j = 0; j < n; j++) if (Math.abs(lum[j] - paper) > 0.25 * Math.max(paper, 60)) { m[j] = 1; cnt++; }
+      if (cnt < n * 0.002) return null;
+      // join strokes closer than ~1.3% of the page sideways but only ~0.4% up and down: a picture's lines join into
+      // one block, while lines of text (stacked with gaps between them) stay separate strips
+      var r = Math.max(2, Math.round(Math.max(w, h) * 0.013)), rv = Math.max(1, Math.round(r / 3)), g = new Uint8Array(n), g2 = new Uint8Array(n);
+      for (var y = 0; y < h; y++) for (var xx = 0; xx < w; xx++) { var on = 0; for (var dx = -r; dx <= r && !on; dx++) { var q = xx + dx; if (q >= 0 && q < w && m[y * w + q]) on = 1; } g[y * w + xx] = on; }
+      for (var y2 = 0; y2 < h; y2++) for (var x2 = 0; x2 < w; x2++) { var on2 = 0; for (var dy = -rv; dy <= rv && !on2; dy++) { var q2 = y2 + dy; if (q2 >= 0 && q2 < h && g[q2 * w + x2]) on2 = 1; } g2[y2 * w + x2] = on2; }
+      var lab = new Int32Array(n).fill(-1), best = null;
+      for (var p = 0; p < n; p++) {
+        if (!g2[p] || lab[p] >= 0) continue;
+        var st = [p], b = { ink: 0, x0: w, y0: h, x1: 0, y1: 0 }; lab[p] = p;
+        while (st.length) {
+          var v = st.pop(), vx = v % w, vy = (v / w) | 0;
+          if (m[v]) b.ink++;
+          if (vx < b.x0) b.x0 = vx; if (vx > b.x1) b.x1 = vx; if (vy < b.y0) b.y0 = vy; if (vy > b.y1) b.y1 = vy;
+          [vx > 0 ? v - 1 : -1, vx < w - 1 ? v + 1 : -1, v - w, v + w].forEach(function (u) { if (u >= 0 && u < n && g2[u] && lab[u] < 0) { lab[u] = p; st.push(u); } });
+        }
+        if (!best || b.ink > best.ink) best = b;
+      }
+      if (!best) return null;
+      var pad = Math.round(Math.max(w, h) * 0.01);
+      var c = { l: (best.x0 + r - pad) / w, t: (best.y0 + rv - pad) / h, r: (w - 1 - best.x1 + r - pad) / w, b: (h - 1 - best.y1 + rv - pad) / h };
+      Object.keys(c).forEach(function (q) { c[q] = Math.max(0, Math.min(45, Math.round(c[q] * 100))); });
+      return c.l || c.t || c.r || c.b ? c : null;
+    });
   }
   // how a picture becomes stitches: colour areas (flat art, paintings) or line art
   function imageArtHtml(L, isSvg) {
@@ -356,12 +408,14 @@
     if (line) {
       var st = meta.lineArt;
       h += row('Lines', seg('L.p.lineWeight', [['auto', 'Auto'], ['single', 'Single'], ['triple', 'Triple']], { label: 'Line weight' })) +
+        row('Ink', seg('L.p.polarity', [['auto', 'Auto'], ['dark', 'Dark lines'], ['light', 'Light lines']], { label: 'Which marks are the drawing' })) +
         row('Shading', seg('L.p.shading', [['hatch', 'Hatching'], ['solid', 'Solid'], ['none', 'Off']], { label: 'Shading' })) +
         rangeRow('Ink level', 'L.p.ink', 0.2, 0.7, 0.05, 2, '') +
         rangeRow('Stitch length', 'L.p.runLen', 1.5, 3.5, 0.1, 1, ' mm') +
         (empty ? '<p class="note err">No ink found. Lower Ink level to pick up fainter lines.</p>' : '') +
         '<p class="note">Lines are sewn as running stitch along their middle; shading too fine to follow becomes hatching, and solid black is filled. Lines closer than about 0.8 mm run together, so detailed engravings need a bigger size.</p>' +
-        (st && !rt(L.id).busy ? '<p class="note">' + nfmt(st.lines) + ' line run' + (st.lines === 1 ? '' : 's') + (st.hatchAreas ? ' · ' + nfmt(st.hatchAreas) + ' hatched area' + (st.hatchAreas === 1 ? '' : 's') : '') + '</p>' : '');
+        (st && st.lightGround > 0.02 ? '<p class="note suggest">Light lines on a dark ground are sewn in a light thread, and the dark ground itself isn\'t stitched: sew it on dark fabric.</p>' : '') +
+        (st && !rt(L.id).busy ? '<p class="note">' + nfmt(st.lines) + ' line run' + (st.lines === 1 ? '' : 's') + (st.dots ? ' · ' + nfmt(st.dots) + ' dot' + (st.dots === 1 ? '' : 's') : '') + (st.hatchAreas ? ' · ' + nfmt(st.hatchAreas) + ' hatched area' + (st.hatchAreas === 1 ? '' : 's') : '') + '</p>' : '');
       return h;
     }
     if (reduce) {
@@ -1118,6 +1172,15 @@
           requestRender(L); renderPanel(); commit(); return;
         }
         case 'change-emoji': openEmojiPicker(function (code) { L.p.code = code; L.colors.recolor = {}; L.name = EMOJI[code].char + ' ' + EMOJI[code].label; requestRender(L); renderPanel(); commit(); }); return;
+        case 'crop-reset': L.p.crop = { l: 0, t: 0, r: 0, b: 0 }; requestRender(L); renderPanel(); commit(); return;
+        case 'crop-auto':
+          act.disabled = true;
+          findPictureCrop(L).then(function (c) {
+            if (!c) { toast('Couldn’t find a separate picture to crop to. Use the sliders.'); renderPanel(); return; }
+            L.p.crop = c; requestRender(L); renderPanel(); commit();
+            toast('Cropped to the picture · adjust with the sliders');
+          }, function () { renderPanel(); toast('Couldn’t read the picture to crop it.'); });
+          return;
         case 'reset-colours': L.colors.recolor = {}; recolorLayer(L); refreshLayerRow(L.id); renderPanel(); scheduleSequence(); commit(); return;
         case 'theme': applyThemeTo(act.dataset.v); return;
         case 'flag': ui.prideFlag = act.dataset.v; applyThemeTo(A.themes.filter(function (t) { return t.flag === act.dataset.v; })[0].name); return;

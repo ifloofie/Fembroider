@@ -22,7 +22,7 @@ const ar = img.width / img.height, wmm = ar >= 1 ? SIZE : SIZE * ar, hmm = ar >=
 const w = Math.ceil(wmm * S), h = Math.ceil(hmm * S), n = seqs.length + 1, out = createCanvas(w * n, h), x = out.getContext('2d');
 x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(img, 0, 0, w, h);
 seqs.forEach((seq, k) => {
-  x.save(); x.translate(w * (k + 1), 0); x.fillStyle = '#f4f0e8'; x.fillRect(0, 0, w, h); x.beginPath(); x.rect(0, 0, w, h); x.clip();
+  x.save(); x.translate(w * (k + 1), 0); x.fillStyle = process.env.BG || '#f4f0e8'; x.fillRect(0, 0, w, h); x.beginPath(); x.rect(0, 0, w, h); x.clip();
   const b = seq.bounds, ox = w / 2 - (b.minX + b.maxX) / 2 * S, oy = h / 2 + (b.minY + b.maxY) / 2 * S;
   const tx = p => ox + p[0] * S, ty = p => oy - p[1] * S;
   x.lineCap = 'round'; x.lineWidth = 0.38 * S;

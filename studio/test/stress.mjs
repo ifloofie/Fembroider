@@ -100,10 +100,12 @@ if (mode === 'fonts') {
     const spec = Object.assign({}, base, { kind: 'raster', source: img, sizeMM: SIZE, maxColors: COLS, removeBg: true });
     delete spec.effects;
     if (process.env.LINE) Object.assign(spec, { lineArt: true, lineWeight: process.env.WEIGHT || 'auto', shading: process.env.SHADE || 'hatch' });
+    if (process.env.ART === 'flat') spec.graphic = true; else if (process.env.ART === 'painting') spec.graphic = false;
     if (svg) { const pal = E.parseSvgPalette(buf.toString('utf8')); if (pal.length) { spec.palette = pal; delete spec.maxColors; } }
     const res = run(f, spec);
+    if (res.out && res.r) { const mt = res.r.meta || {}; Object.assign(res.out, { painting: mt.painting, lineHint: mt.lineHint, thinInk: mt.thinInk, near: mt.near && mt.near[1], line: mt.lineArt ? { runs: mt.lineArt.lines, hatch: mt.lineArt.hatchAreas } : undefined }); }
     emit(res.out || res);
-    if (res.r) keep.push({ f, r: res.r, seq: res.seq });
+    if (res.r && !process.env.NOSHEET) keep.push({ f, r: res.r, seq: res.seq });
   }
   // contact sheet: the stitched result next to each source
   for (const k of keep) {
@@ -114,6 +116,6 @@ if (mode === 'fonts') {
     fs.writeFileSync(`${OUT}/img_${k.f.replace(/\.[^.]+$/, '')}_${SIZE}mm_${COLS}c${process.env.LINE ? '_line' : ''}.png`, c.toBuffer('image/png'));
   }
 }
-const tag = `${mode}_${a0 || 0}_${a1 || 'end'}` + (mode === 'images' ? `_${process.env.SIZE || 100}mm_${process.env.COLORS || 5}c` + (process.env.LINE ? '_line' : '') + (process.env.ONLY ? '_' + process.env.ONLY.replace(/\W/g, '') : '') : '');
+const tag = `${mode}_${a0 || 0}_${a1 || 'end'}` + (mode === 'images' ? `_${process.env.SIZE || 100}mm_${process.env.COLORS || 5}c` + (process.env.LINE ? '_line' : '') + (process.env.ART ? '_' + process.env.ART : '') + (process.env.ONLY ? '_' + process.env.ONLY.replace(/\W/g, '') : '') : '');
 fs.writeFileSync(`${OUT}/${tag}.jsonl`, results.map(r => JSON.stringify(r)).join('\n') + '\n');
 console.log(tag, results.length, 'designs', results.filter(r => r.error).length, 'errors');

@@ -35,7 +35,7 @@ you can switch at any time and compare. (When a picture looks like a drawing, it
 - **Painting** smooths brushwork and grain into calmer patches of colour. Best for paintings and photos: they sew
   much faster and with far fewer *jumps* (each time the machine stops, ties off and moves to a new spot).
 - **Line art** follows the lines of a drawing with fine running stitch and turns shading into stitched hatching,
-  in one thread. Best for ink drawings, engravings and woodcuts.
+  in one thread. Best for ink drawings, engravings and woodcuts, and for star charts and other light-on-dark plates.
 
 ### Paintings
 
@@ -65,6 +65,14 @@ the lines instead.
 
 <sub>John Tenniel's illustration for *Alice's Adventures in Wonderland* (1865) at 15 cm. Left: the original. Middle:
 filled in the usual way, five threads and about 51 minutes. Right: Fembroider's line art, one thread and about 34 minutes.</sub>
+
+Line art also works the other way round: white stars, comets and white-line prints on a dark ground. The light marks
+are sewn in a light thread (stars become small tacked dots) and the dark ground is left to the fabric, so you sew them
+on dark fabric.
+
+![Two 19th-century astronomy plates: a comet and its nucleus, and Encke's Comet among stars. Each original is shown next to Fembroider's line-art version on dark fabric, with the comets and stars in pale thread.](docs/images/line-art-light-on-dark.jpg)
+
+<sub>Plates from the British Library's digitised books: "Head and Nucleus of Comet, 1811" and "Encke's Comet", each at 10 cm.</sub>
 
 All the artworks shown are in the public domain.
 
@@ -106,6 +114,9 @@ JEF for Janome, DST for commercial machines) and shows step-by-step instructions
 
 **Where is my work saved?** Use *Project › Save* to keep a `.fembroider` file you can open again or share. On top of
 that, Fembroider saves as you go and keeps earlier versions you can go back to (*Project › Version history*).
+
+**My scan has page text or a border around the picture.** Open *Crop* under the picture's settings and press
+*Find the picture*, or trim each side with the sliders.
 
 **My picture came out messy.** Try making it bigger, choosing fewer colours, or switching *Artwork* between
 *Flat art*, *Painting* and *Line art*. Hover over any setting in the app for a short explanation.
